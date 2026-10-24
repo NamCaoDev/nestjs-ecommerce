@@ -1,3 +1,5 @@
+import { OrderItemReadModel } from './order-item.read-model';
+
 /**
  * Read model of one order, as returned by the query side (no aggregate involved).
  * Amounts are in major currency units; timestamps are epoch milliseconds.
@@ -13,13 +15,7 @@ export interface OrderReadModel {
   readonly discountAmount: number;
   readonly totalAmount: number;
   readonly shippingAddress: Record<string, unknown>;
-  readonly items: ReadonlyArray<{
-    readonly skuId: string;
-    readonly productName: string;
-    readonly quantity: number;
-    readonly unitPrice: number;
-    readonly lineTotal: number;
-  }>;
+  readonly items: readonly OrderItemReadModel[];
   readonly version: number;
   readonly createdAt: number;
   readonly updatedAt: number;

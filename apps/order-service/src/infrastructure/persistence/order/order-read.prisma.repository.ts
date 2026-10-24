@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { FindOrdersByCustomerInput } from '../../../application/ports/find-orders-by-customer.input';
 import { OrderReadPort } from '../../../application/ports/order-read.port';
+import { OrderItemReadModel } from '../../../application/read-models/order-item.read-model';
 import { OrderReadModel } from '../../../application/read-models/order.read-model';
 import { OrdersPageReadModel } from '../../../application/read-models/orders-page.read-model';
 import { PrismaService } from '../prisma/prisma.service';
@@ -79,9 +80,7 @@ export class OrderReadPrismaRepository implements OrderReadPort {
       totalAmount: record.totalAmount.toNumber(),
       shippingAddress: record.shippingAddress as Record<string, unknown>,
       items: record.items.map(
-        (
-          item: OrderWithItemsRecord['items'][number],
-        ): OrderReadModel['items'][number] => ({
+        (item: OrderWithItemsRecord['items'][number]): OrderItemReadModel => ({
           skuId: item.skuId,
           productName: (item.productSnapshot as unknown as ProductSnapshotJson)
             .name,
