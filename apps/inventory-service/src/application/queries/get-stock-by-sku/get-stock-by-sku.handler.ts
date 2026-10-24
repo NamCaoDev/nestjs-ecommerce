@@ -3,6 +3,7 @@ import { IQueryHandler, QueryHandler } from '@nestjs/cqrs';
 import type { StockCachePort } from '../../ports/stock-cache.port';
 import { STOCK_CACHE_PORT } from '../../ports/stock-cache.token';
 import { StockCounters } from '../../ports/stock-counters.type';
+import { StockSnapshot } from '../../ports/stock-snapshot.type';
 import type { StockReadPort } from '../../ports/stock-read.port';
 import { STOCK_READ_PORT } from '../../ports/stock-read.token';
 import { StockLevelReadModel } from '../../read-models/stock-level.read-model';
@@ -41,7 +42,7 @@ export class GetStockBySkuHandler implements IQueryHandler<
         source: 'REDIS',
       });
     }
-    const storedCounters: StockCounters | undefined =
+    const storedCounters: StockSnapshot | undefined =
       await this.stockRead.findCounters(query.skuId);
     if (storedCounters === undefined) {
       return undefined;
@@ -64,7 +65,9 @@ export class GetStockBySkuHandler implements IQueryHandler<
     readonly source: StockLevelReadModel['source'];
   }): StockLevelReadModel {
     return {
-      ...counters,
+      skuId: counters.skuId,
+      totalQuantity: counters.totalQuantity,
+      reservedQuantity: counters.reservedQuantity,
       availableQuantity: counters.totalQuantity - counters.reservedQuantity,
       source,
     };

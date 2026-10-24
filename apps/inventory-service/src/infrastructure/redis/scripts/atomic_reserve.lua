@@ -11,7 +11,8 @@
 -- ARGV[5]        items as JSON [{skuId, quantity}], read back by commit and the sweeper
 -- ARGV[6..n+5]   quantity to reserve for KEYS[i]
 --
--- Returns 1 when reserved, 0 when any SKU is unknown or short of stock,
+-- Returns 1 when reserved, 0 when any SKU is short of stock,
+-- 3 when a stock hash is missing (cold cache: the caller restores it from PostgreSQL and retries),
 -- 2 when the reservation already exists (idempotent replay: nothing is reserved twice,
 -- but the replaying order is indexed so its order.placed event can still commit it).
 -- Expiry is driven by the ZSET, never by the hash TTL, so the sweeper always finds what it must release.
@@ -19,6 +20,7 @@
 local RESERVED = 1
 local INSUFFICIENT_STOCK = 0
 local ALREADY_RESERVED = 2
+local STOCK_NOT_LOADED = 3
 local FIRST_STOCK_KEY = 4
 local QUANTITY_OFFSET = 2
 
@@ -31,7 +33,7 @@ for i = FIRST_STOCK_KEY, #KEYS do
   local quantity = tonumber(ARGV[i + QUANTITY_OFFSET])
   local total = tonumber(redis.call('HGET', KEYS[i], 'total'))
   if total == nil then
-    return INSUFFICIENT_STOCK
+    return STOCK_NOT_LOADED
   end
   local reserved = tonumber(redis.call('HGET', KEYS[i], 'reserved') or '0')
   if total - reserved < quantity then

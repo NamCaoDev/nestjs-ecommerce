@@ -7,12 +7,15 @@ import type { StockLedgerRepositoryPort } from '../../../domain/ports/stock-ledg
 import { STOCK_LEDGER_REPOSITORY_PORT } from '../../../domain/ports/stock-ledger-repository.token';
 import type { StockReservationStorePort } from '../../../domain/ports/stock-reservation-store.port';
 import { STOCK_RESERVATION_STORE_PORT } from '../../../domain/ports/stock-reservation-store.token';
+import { ReservationLine } from '../../../domain/value-objects/reservation-line.type';
 import { StockReservation } from '../../../domain/value-objects/stock-reservation.vo';
+import { StockCacheWarmer } from '../../services/stock-cache-warmer.service';
 import { ReserveStockCommand } from './reserve-stock.command';
 
 /**
  * Reserves stock atomically on Redis, then records the movement in PostgreSQL (CLAUDE.md §4.1).
- * A replayed reservation key succeeds without reserving or recording twice. If the ledger write
+ * A replayed reservation key succeeds without reserving or recording twice. On a cold cache the
+ * missing counters are restored from PostgreSQL and the reservation is retried once. If the ledger write
  * fails, the Redis reservation is released so both stores stay consistent.
  */
 @CommandHandler(ReserveStockCommand)
@@ -25,12 +28,14 @@ export class ReserveStockHandler implements ICommandHandler<
   /**
    * @param reservationStore - Atomic Redis store.
    * @param stockLedger - Durable ledger.
+   * @param stockCacheWarmer - Restores missing Redis counters from PostgreSQL.
    */
   public constructor(
     @Inject(STOCK_RESERVATION_STORE_PORT)
     private readonly reservationStore: StockReservationStorePort,
     @Inject(STOCK_LEDGER_REPOSITORY_PORT)
     private readonly stockLedger: StockLedgerRepositoryPort,
+    private readonly stockCacheWarmer: StockCacheWarmer,
   ) {}
 
   /**
@@ -47,7 +52,7 @@ export class ReserveStockHandler implements ICommandHandler<
     }
     const reservation: StockReservation = reservationResult.getValue();
     const outcome: ReservationOutcome =
-      await this.reservationStore.reserve(reservation);
+      await this.reserveWithWarmUp(reservation);
     if (outcome === 'INSUFFICIENT_STOCK') {
       return Result.fail(new InsufficientStockError());
     }
@@ -72,5 +77,27 @@ export class ReserveStockHandler implements ICommandHandler<
         await this.reservationStore.release(reservation);
         throw err;
       });
+  }
+
+  /**
+   * Reserves; when a SKU has no Redis counters, restores them from PostgreSQL and retries once.
+   * A SKU still missing afterwards is unknown to both stores and counts as out of stock.
+   */
+  private async reserveWithWarmUp(
+    reservation: StockReservation,
+  ): Promise<ReservationOutcome> {
+    const outcome: ReservationOutcome =
+      await this.reservationStore.reserve(reservation);
+    if (outcome !== 'STOCK_NOT_LOADED') {
+      return outcome;
+    }
+    await this.stockCacheWarmer.warmSkus(
+      reservation.items.map((item: ReservationLine): string => item.skuId),
+    );
+    const retriedOutcome: ReservationOutcome =
+      await this.reservationStore.reserve(reservation);
+    return retriedOutcome === 'STOCK_NOT_LOADED'
+      ? 'INSUFFICIENT_STOCK'
+      : retriedOutcome;
   }
 }

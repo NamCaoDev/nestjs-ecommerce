@@ -97,6 +97,7 @@ describe('RedisInventoryRepository', () => {
       { inputReply: 1, expectedOutcome: 'RESERVED' },
       { inputReply: 0, expectedOutcome: 'INSUFFICIENT_STOCK' },
       { inputReply: 2, expectedOutcome: 'ALREADY_RESERVED' },
+      { inputReply: 3, expectedOutcome: 'STOCK_NOT_LOADED' },
     ])(
       'should map reply $inputReply to $expectedOutcome',
       async ({ inputReply, expectedOutcome }) => {
@@ -157,6 +158,11 @@ describe('RedisInventoryRepository', () => {
       {
         inputReply: [0, 0],
         expectedOutcome: 'EXPIRED_AND_OUT_OF_STOCK',
+        expectedReacquired: false,
+      },
+      {
+        inputReply: [4, 0],
+        expectedOutcome: 'STOCK_NOT_LOADED',
         expectedReacquired: false,
       },
     ])(

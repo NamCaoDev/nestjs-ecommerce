@@ -15,11 +15,13 @@
 --   {3, 1} REACQUIRED_AND_COMMITTED   the reservation was gone (expired/released) but the stock was
 --                                     still available: only total decreases (reserved was already freed)
 --   {0, 0} EXPIRED_AND_OUT_OF_STOCK   the reservation was gone and the stock is no longer available
+--   {4, 0} STOCK_NOT_LOADED           a stock hash is missing (cold cache): the caller restores it and retries
 
 local EXPIRED_AND_OUT_OF_STOCK = 0
 local COMMITTED = 1
 local ALREADY_COMMITTED = 2
 local REACQUIRED_AND_COMMITTED = 3
+local STOCK_NOT_LOADED = 4
 local FIRST_STOCK_KEY = 3
 local QUANTITY_OFFSET = 2
 
@@ -35,6 +37,12 @@ if status == 'COMMITTED' then
   return {ALREADY_COMMITTED, reacquired}
 end
 
+for i = FIRST_STOCK_KEY, #KEYS do
+  if redis.call('EXISTS', KEYS[i]) == 0 then
+    return {STOCK_NOT_LOADED, 0}
+  end
+end
+
 if status == 'RESERVED' then
   for i = FIRST_STOCK_KEY, #KEYS do
     local quantity = tonumber(ARGV[i + QUANTITY_OFFSET])
@@ -48,9 +56,6 @@ end
 for i = FIRST_STOCK_KEY, #KEYS do
   local quantity = tonumber(ARGV[i + QUANTITY_OFFSET])
   local total = tonumber(redis.call('HGET', KEYS[i], 'total'))
-  if total == nil then
-    return {EXPIRED_AND_OUT_OF_STOCK, 0}
-  end
   local reserved = tonumber(redis.call('HGET', KEYS[i], 'reserved') or '0')
   if total - reserved < quantity then
     return {EXPIRED_AND_OUT_OF_STOCK, 0}

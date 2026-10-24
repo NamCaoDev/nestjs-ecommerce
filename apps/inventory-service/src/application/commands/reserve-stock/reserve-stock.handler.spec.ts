@@ -5,6 +5,7 @@ import { StockLedgerRepositoryPort } from '../../../domain/ports/stock-ledger-re
 import { StockReservationStorePort } from '../../../domain/ports/stock-reservation-store.port';
 import { StockCommandProps } from '../stock-command.props';
 import { ReserveStockCommand } from './reserve-stock.command';
+import { StockCacheWarmer } from '../../services/stock-cache-warmer.service';
 import { ReserveStockHandler } from './reserve-stock.handler';
 
 const VALID_PROPS: StockCommandProps = {
@@ -16,6 +17,7 @@ const VALID_PROPS: StockCommandProps = {
 describe('ReserveStockHandler', () => {
   let mockStore: jest.Mocked<StockReservationStorePort>;
   let mockLedger: jest.Mocked<StockLedgerRepositoryPort>;
+  let mockWarmer: { readonly warmSkus: jest.Mock };
   let handler: ReserveStockHandler;
   beforeEach(() => {
     mockStore = {
@@ -29,7 +31,12 @@ describe('ReserveStockHandler', () => {
       recordMovement: jest.fn().mockResolvedValue(undefined),
       hasMovement: jest.fn().mockResolvedValue(false),
     };
-    handler = new ReserveStockHandler(mockStore, mockLedger);
+    mockWarmer = { warmSkus: jest.fn().mockResolvedValue(1) };
+    handler = new ReserveStockHandler(
+      mockStore,
+      mockLedger,
+      mockWarmer as unknown as StockCacheWarmer,
+    );
   });
   describe('execute', () => {
     it('should reserve on Redis and record a RESERVED movement', async () => {
@@ -94,6 +101,35 @@ describe('ReserveStockHandler', () => {
       // Assert
       await expect(actualExecution).rejects.toBe(expectedError);
       expect(mockStore.release).toHaveBeenCalledTimes(1);
+    });
+    it('should restore cold Redis counters from PostgreSQL and retry once', async () => {
+      // Arrange
+      mockStore.reserve
+        .mockResolvedValueOnce('STOCK_NOT_LOADED')
+        .mockResolvedValueOnce('RESERVED');
+      // Act
+      const actualResult: Result<void, DomainError> = await handler.execute(
+        new ReserveStockCommand(VALID_PROPS),
+      );
+      // Assert
+      expect(actualResult.isSuccess).toBe(true);
+      expect(mockWarmer.warmSkus).toHaveBeenCalledWith([
+        VALID_PROPS.items[0].skuId,
+      ]);
+      expect(mockStore.reserve).toHaveBeenCalledTimes(2);
+      expect(mockLedger.recordMovement).toHaveBeenCalledTimes(1);
+    });
+    it('should treat a SKU unknown to both stores as out of stock', async () => {
+      // Arrange
+      mockStore.reserve.mockResolvedValue('STOCK_NOT_LOADED');
+      mockWarmer.warmSkus.mockResolvedValue(0);
+      // Act
+      const actualResult: Result<void, DomainError> = await handler.execute(
+        new ReserveStockCommand(VALID_PROPS),
+      );
+      // Assert
+      expect(actualResult.getError()).toBeInstanceOf(InsufficientStockError);
+      expect(mockStore.reserve).toHaveBeenCalledTimes(2);
     });
   });
 });

@@ -7,6 +7,9 @@ const RESERVATION_KEY_PREFIX = 'inventory:reservation:';
 /** Prefix of the order → reservation key index. */
 const RESERVATION_ORDER_KEY_PREFIX = 'inventory:reservation_order:';
 
+/** Prefix of the markers of `stock.restocked` events already applied to Redis. */
+const APPLIED_RESTOCK_KEY_PREFIX = 'inventory:applied_restock:';
+
 /** Sorted set of `RESERVED` reservation keys scored by expiry time (epoch ms). */
 const RESERVATION_EXPIRATIONS_KEY = 'inventory:reservation_expirations';
 
@@ -40,5 +43,13 @@ export class InventoryRedisKeys {
    */
   public static toReservationOrderKey(orderId: string): string {
     return `${RESERVATION_ORDER_KEY_PREFIX}${orderId}`;
+  }
+
+  /**
+   * @param eventId - `stock.restocked` outbox event id.
+   * @returns The key marking the event as applied to Redis.
+   */
+  public static toAppliedRestockKey(eventId: string): string {
+    return `${APPLIED_RESTOCK_KEY_PREFIX}${eventId}`;
   }
 }

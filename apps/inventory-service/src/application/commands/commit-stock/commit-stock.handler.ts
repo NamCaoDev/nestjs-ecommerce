@@ -12,9 +12,11 @@ import type { StockLedgerRepositoryPort } from '../../../domain/ports/stock-ledg
 import { STOCK_LEDGER_REPOSITORY_PORT } from '../../../domain/ports/stock-ledger-repository.token';
 import type { StockReservationStorePort } from '../../../domain/ports/stock-reservation-store.port';
 import { STOCK_RESERVATION_STORE_PORT } from '../../../domain/ports/stock-reservation-store.token';
+import { ReservationLine } from '../../../domain/value-objects/reservation-line.type';
 import { StockReservation } from '../../../domain/value-objects/stock-reservation.vo';
 import type { InventoryEventPublisherPort } from '../../ports/inventory-event-publisher.port';
 import { INVENTORY_EVENT_PUBLISHER_PORT } from '../../ports/inventory-event-publisher.token';
+import { StockCacheWarmer } from '../../services/stock-cache-warmer.service';
 import { CommitStockCommand } from './commit-stock.command';
 
 /** Reservation key of a commit made without a live reservation; also its idempotency marker. */
@@ -26,7 +28,9 @@ const LATE_COMMIT_KEY_PREFIX = 'order:';
  * - when the stock is gone, `stock.reservation_failed` is published so the order gets cancelled;
  * - the `COMMITTED` ledger entry is reconciled on every shipped outcome, including redeliveries,
  *   so a crash between Redis and PostgreSQL never leaves the ledger behind.
- * Safe to repeat: Redis and the ledger both deduplicate by order.
+ * Safe to repeat: Redis and the ledger both deduplicate by order. On a cold cache the missing counters
+ * are restored from PostgreSQL and the commit is retried once, so an order is never cancelled because
+ * Redis lost its data.
  */
 @CommandHandler(CommitStockCommand)
 export class CommitStockHandler implements ICommandHandler<
@@ -39,6 +43,7 @@ export class CommitStockHandler implements ICommandHandler<
    * @param reservationStore - Atomic Redis store.
    * @param stockLedger - Durable ledger.
    * @param eventPublisher - Inventory integration events.
+   * @param stockCacheWarmer - Restores missing Redis counters from PostgreSQL.
    */
   public constructor(
     @Inject(STOCK_RESERVATION_STORE_PORT)
@@ -47,6 +52,7 @@ export class CommitStockHandler implements ICommandHandler<
     private readonly stockLedger: StockLedgerRepositoryPort,
     @Inject(INVENTORY_EVENT_PUBLISHER_PORT)
     private readonly eventPublisher: InventoryEventPublisherPort,
+    private readonly stockCacheWarmer: StockCacheWarmer,
   ) {}
 
   /**
@@ -63,7 +69,7 @@ export class CommitStockHandler implements ICommandHandler<
     }
     const reservation: StockReservation = reservationResult.getValue();
     const { outcome, isReacquired }: CommitResult =
-      await this.reservationStore.commit(reservation);
+      await this.commitWithWarmUp(reservation);
     if (outcome === 'EXPIRED_AND_OUT_OF_STOCK') {
       await this.dispatchReservationFailed(reservation);
       return Result.ok();
@@ -141,5 +147,27 @@ export class CommitStockHandler implements ICommandHandler<
       occurredAt: Date.now(),
       payload,
     });
+  }
+
+  /**
+   * Commits; when a SKU has no Redis counters, restores them from PostgreSQL and retries once.
+   * A SKU still missing afterwards is unknown to both stores, so its stock cannot be shipped.
+   */
+  private async commitWithWarmUp(
+    reservation: StockReservation,
+  ): Promise<CommitResult> {
+    const result: CommitResult =
+      await this.reservationStore.commit(reservation);
+    if (result.outcome !== 'STOCK_NOT_LOADED') {
+      return result;
+    }
+    await this.stockCacheWarmer.warmSkus(
+      reservation.items.map((item: ReservationLine): string => item.skuId),
+    );
+    const retriedResult: CommitResult =
+      await this.reservationStore.commit(reservation);
+    return retriedResult.outcome === 'STOCK_NOT_LOADED'
+      ? { outcome: 'EXPIRED_AND_OUT_OF_STOCK', isReacquired: false }
+      : retriedResult;
   }
 }

@@ -16,12 +16,15 @@ describe('GetStockLedgerHandler', () => {
         quantityChanged: 2,
         orderId: 'o1',
         reservationKey: 'k',
+        referenceNote: null,
         createdAt: 1,
       },
     ];
     const mockRead: jest.Mocked<StockReadPort> = {
       findCounters: jest.fn(),
       findLedger: jest.fn().mockResolvedValue(expectedEntries),
+      findCountersBySkuIds: jest.fn(),
+      findCountersPage: jest.fn(),
     };
     const handler: GetStockLedgerHandler = new GetStockLedgerHandler(mockRead);
     // Act
