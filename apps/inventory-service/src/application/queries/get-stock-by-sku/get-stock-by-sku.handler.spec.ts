@@ -20,10 +20,14 @@ describe('GetStockBySkuHandler', () => {
     mockCache = {
       findCounters: jest.fn().mockResolvedValue(COUNTERS),
       saveCountersIfAbsent: jest.fn().mockResolvedValue(undefined),
+      saveManyCountersIfAbsent: jest.fn(),
+      applyRestock: jest.fn(),
     };
     mockRead = {
       findCounters: jest.fn().mockResolvedValue(COUNTERS),
       findLedger: jest.fn(),
+      findCountersBySkuIds: jest.fn(),
+      findCountersPage: jest.fn(),
     };
     handler = new GetStockBySkuHandler(mockCache, mockRead);
   });

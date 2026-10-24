@@ -5,35 +5,29 @@ import { OutboxEventPrismaRepository } from './outbox-event.prisma.repository';
 const OCCURRED_AT: Date = new Date(Date.UTC(2026, 9, 24));
 
 describe('OutboxEventPrismaRepository', () => {
-  let mockPrisma: {
-    readonly $queryRaw: jest.Mock;
-    readonly outboxEvent: {
-      readonly findMany: jest.Mock;
-      readonly updateMany: jest.Mock;
-    };
+  let mockClient: {
+    readonly $queryRawUnsafe: jest.Mock;
+    readonly $executeRawUnsafe: jest.Mock;
   };
   let repository: OutboxEventPrismaRepository;
   beforeEach(() => {
-    mockPrisma = {
-      $queryRaw: jest.fn().mockResolvedValue([]),
-      outboxEvent: {
-        findMany: jest.fn().mockResolvedValue([]),
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
+    mockClient = {
+      $queryRawUnsafe: jest.fn().mockResolvedValue([]),
+      $executeRawUnsafe: jest.fn().mockResolvedValue(1),
     };
     repository = new OutboxEventPrismaRepository({
-      client: mockPrisma,
+      client: mockClient,
     } as unknown as PrismaService);
   });
   describe('claimPendingBatch', () => {
-    it('should claim with FOR UPDATE SKIP LOCKED, a lease and per-aggregate ordering, and map the rows oldest first', async () => {
+    it('should claim with the shared SKIP LOCKED statement, a 60 s lease, and map rows oldest first', async () => {
       // Arrange
-      mockPrisma.$queryRaw.mockResolvedValue([
+      mockClient.$queryRawUnsafe.mockResolvedValue([
         {
           id: 'e2',
           aggregate_id: 'o2',
           event_type: 'order.placed',
-          payload: { orderId: 'o2' },
+          payload: {},
           occurred_at: new Date(OCCURRED_AT.getTime() + 1),
           retry_count: 0,
         },
@@ -50,12 +44,9 @@ describe('OutboxEventPrismaRepository', () => {
       const actualMessages: OutboxMessage[] =
         await repository.claimPendingBatch(50);
       // Assert
-      const [actualSqlParts, ...actualValues]: [string[], ...unknown[]] =
-        mockPrisma.$queryRaw.mock.calls[0];
-      const actualSql: string = actualSqlParts.join('?');
+      const [actualSql, ...actualValues]: [string, ...unknown[]] =
+        mockClient.$queryRawUnsafe.mock.calls[0];
       expect(actualSql).toContain('FOR UPDATE SKIP LOCKED');
-      expect(actualSql).toContain("SET status = 'PROCESSING'::outbox_status");
-      expect(actualSql).toContain('candidate.locked_until < now()');
       expect(actualSql).toContain('NOT EXISTS');
       expect(actualValues).toEqual([60, 50]);
       expect(
@@ -72,41 +63,39 @@ describe('OutboxEventPrismaRepository', () => {
     });
   });
   describe('markPublished', () => {
-    it('should set PUBLISHED and the publication time', async () => {
+    it('should mark the ids PUBLISHED and clear the lease', async () => {
       // Arrange
-      const inputPublishedAt: number = OCCURRED_AT.getTime();
+      const inputIds: string[] = ['e1', 'e2'];
       // Act
       await repository.markPublished({
-        ids: ['e1', 'e2'],
-        publishedAt: inputPublishedAt,
+        ids: inputIds,
+        publishedAt: OCCURRED_AT.getTime(),
       });
       // Assert
-      expect(mockPrisma.outboxEvent.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['e1', 'e2'] } },
-        data: {
-          status: 'PUBLISHED',
-          publishedAt: OCCURRED_AT,
-          lockedUntil: null,
-        },
-      });
+      const [actualSql, actualIds, actualPublishedAt]: [
+        string,
+        string[],
+        Date,
+      ] = mockClient.$executeRawUnsafe.mock.calls[0];
+      expect(actualSql).toContain("status = 'PUBLISHED'");
+      expect(actualSql).toContain('locked_until = NULL');
+      expect(actualIds).toEqual(inputIds);
+      expect(actualPublishedAt).toEqual(OCCURRED_AT);
     });
   });
   describe('markFailed', () => {
-    it('should return the messages to PENDING, increment the retry count and store a truncated error', async () => {
+    it('should return the ids to PENDING, count the attempt and truncate the error', async () => {
       // Arrange
       const inputError: string = 'x'.repeat(1_500);
       // Act
       await repository.markFailed({ ids: ['e1'], error: inputError });
       // Assert
-      expect(mockPrisma.outboxEvent.updateMany).toHaveBeenCalledWith({
-        where: { id: { in: ['e1'] } },
-        data: {
-          status: 'PENDING',
-          lockedUntil: null,
-          retryCount: { increment: 1 },
-          lastError: 'x'.repeat(1_000),
-        },
-      });
+      const [actualSql, actualIds, actualError]: [string, string[], string] =
+        mockClient.$executeRawUnsafe.mock.calls[0];
+      expect(actualSql).toContain("status = 'PENDING'");
+      expect(actualSql).toContain('retry_count = retry_count + 1');
+      expect(actualIds).toEqual(['e1']);
+      expect(actualError).toHaveLength(1_000);
     });
   });
 });

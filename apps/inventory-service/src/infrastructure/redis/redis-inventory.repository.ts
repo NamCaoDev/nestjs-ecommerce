@@ -17,6 +17,7 @@ const RESERVE_REPLY_TO_OUTCOME: Readonly<Record<number, ReservationOutcome>> = {
   0: 'INSUFFICIENT_STOCK',
   1: 'RESERVED',
   2: 'ALREADY_RESERVED',
+  3: 'STOCK_NOT_LOADED',
 };
 
 /** Replies of `atomic_release.lua`. */
@@ -31,6 +32,7 @@ const COMMIT_REPLY_TO_OUTCOME: Readonly<Record<number, CommitOutcome>> = {
   1: 'COMMITTED',
   2: 'ALREADY_COMMITTED',
   3: 'REACQUIRED_AND_COMMITTED',
+  4: 'STOCK_NOT_LOADED',
 };
 
 /** Second element of the `atomic_commit.lua` reply when the stock was re-acquired. */

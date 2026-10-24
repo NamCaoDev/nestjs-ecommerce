@@ -7,6 +7,7 @@ import { ReservationLine } from '../../../domain/value-objects/reservation-line.
 import { StockReservation } from '../../../domain/value-objects/stock-reservation.vo';
 import { InventoryEventPublisherPort } from '../../ports/inventory-event-publisher.port';
 import { CommitStockCommand } from './commit-stock.command';
+import { StockCacheWarmer } from '../../services/stock-cache-warmer.service';
 import { CommitStockHandler } from './commit-stock.handler';
 
 const PLACED_ORDER_ID = '0199a7c0-0000-7000-8000-000000000002';
@@ -29,6 +30,7 @@ describe('CommitStockHandler', () => {
   let mockStore: jest.Mocked<StockReservationStorePort>;
   let mockLedger: jest.Mocked<StockLedgerRepositoryPort>;
   let mockPublisher: jest.Mocked<InventoryEventPublisherPort>;
+  let mockWarmer: { readonly warmSkus: jest.Mock };
   let handler: CommitStockHandler;
   beforeEach(() => {
     mockStore = {
@@ -45,7 +47,13 @@ describe('CommitStockHandler', () => {
       hasMovement: jest.fn().mockResolvedValue(false),
     };
     mockPublisher = { publish: jest.fn().mockResolvedValue(undefined) };
-    handler = new CommitStockHandler(mockStore, mockLedger, mockPublisher);
+    mockWarmer = { warmSkus: jest.fn().mockResolvedValue(1) };
+    handler = new CommitStockHandler(
+      mockStore,
+      mockLedger,
+      mockPublisher,
+      mockWarmer as unknown as StockCacheWarmer,
+    );
     jest
       .spyOn(handler['logger'], 'warn')
       .mockImplementation((): void => undefined);
@@ -178,6 +186,36 @@ describe('CommitStockHandler', () => {
       // Assert
       expect(actualResult.getError()).toBeInstanceOf(InvalidReservationError);
       expect(mockStore.commit).not.toHaveBeenCalled();
+    });
+    it('should restore cold Redis counters and retry the commit instead of cancelling the order', async () => {
+      // Arrange
+      mockStore.commit
+        .mockResolvedValueOnce({
+          outcome: 'STOCK_NOT_LOADED',
+          isReacquired: false,
+        })
+        .mockResolvedValueOnce({ outcome: 'COMMITTED', isReacquired: false });
+      // Act
+      await handler.execute(createInputCommand());
+      // Assert
+      expect(mockWarmer.warmSkus).toHaveBeenCalledWith([EVENT_ITEMS[0].skuId]);
+      expect(mockPublisher.publish).not.toHaveBeenCalled();
+      expect(mockLedger.recordMovement).toHaveBeenCalledWith(
+        expect.objectContaining({ actionType: 'COMMITTED' }),
+      );
+    });
+    it('should report stock.reservation_failed when the SKU is unknown to both stores', async () => {
+      // Arrange
+      mockStore.commit.mockResolvedValue({
+        outcome: 'STOCK_NOT_LOADED',
+        isReacquired: false,
+      });
+      mockWarmer.warmSkus.mockResolvedValue(0);
+      // Act
+      await handler.execute(createInputCommand());
+      // Assert
+      expect(mockPublisher.publish).toHaveBeenCalledTimes(1);
+      expect(mockLedger.recordMovement).not.toHaveBeenCalled();
     });
   });
 });

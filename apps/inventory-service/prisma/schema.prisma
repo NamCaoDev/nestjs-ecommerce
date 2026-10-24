@@ -14,12 +14,13 @@ datasource db {
   provider = "postgresql"
 }
 
-/// Kind of stock movement recorded in the ledger. EXPIRED_RELEASE: released by the sweeper.
+/// Kind of stock movement recorded in the ledger. EXPIRED_RELEASE: released by the sweeper; RESTOCK: goods received.
 enum StockActionType {
   RESERVED
   RELEASED
   COMMITTED
   EXPIRED_RELEASE
+  RESTOCK
 
   @@map("stock_action_type")
 }
@@ -45,10 +46,14 @@ model StockLedger {
   /// Signed quantity: positive when reserving, negative when releasing.
   quantityChanged Int             @map("quantity_changed")
   actionType      StockActionType @map("action_type")
-  /// Logical reference to the order service; no foreign key.
-  orderId         String          @map("order_id") @db.Uuid
-  /// Reservation key the movement belongs to (customer-scoped Idempotency-Key).
-  reservationKey  String          @map("reservation_key") @db.VarChar(200)
+  /// Logical reference to the order service; no foreign key. Null for RESTOCK.
+  orderId         String?         @map("order_id") @db.Uuid
+  /// Reservation key the movement belongs to (customer-scoped Idempotency-Key). Null for RESTOCK.
+  reservationKey  String?         @map("reservation_key") @db.VarChar(200)
+  /// Free-text reference of a RESTOCK, e.g. a purchase order number.
+  referenceNote   String?         @map("reference_note") @db.VarChar(500)
+  /// Idempotency-Key of the RESTOCK request; unique so a retried request is applied once.
+  idempotencyKey  String?         @unique @map("idempotency_key") @db.VarChar(128)
   createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
   stock           InventoryStock  @relation(fields: [skuId], references: [skuId])
 
@@ -56,4 +61,37 @@ model StockLedger {
   @@index([orderId])
   @@index([reservationKey])
   @@map("stock_ledger")
+}
+
+/// Delivery state of a transactional outbox message. PROCESSING: claimed by a relay until locked_until.
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+
+  @@map("outbox_status")
+}
+
+/// Transactional outbox: written in the same transaction as the stock change, applied to Redis by the
+/// inventory outbox relay (same layout as order-service, so the shared claim statements apply).
+model OutboxEvent {
+  id            String       @id @default(uuid(7)) @db.Uuid
+  aggregateType String       @map("aggregate_type") @db.VarChar(64)
+  /// SKU the event belongs to.
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  /// Event name, e.g. `stock.restocked`.
+  eventType     String       @map("event_type") @db.VarChar(128)
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  retryCount    Int          @default(0) @map("retry_count")
+  lastError     String?      @map("last_error")
+  occurredAt    DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  publishedAt   DateTime?    @map("published_at") @db.Timestamptz(3)
+  /// Lease of a PROCESSING claim; an expired lease makes the message claimable again (crashed relay).
+  lockedUntil   DateTime?    @map("locked_until") @db.Timestamptz(3)
+
+  /// Supports the relay poller: oldest pending messages first.
+  @@index([status, occurredAt])
+  @@index([aggregateId])
+  @@map("outbox_events")
 }

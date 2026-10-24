@@ -19,6 +19,7 @@ const COUNTER_EFFECTS: Readonly<Record<StockActionType, CounterEffect>> = {
   RELEASED: { reserved: -1, total: 0 },
   COMMITTED: { reserved: -1, total: -1 },
   EXPIRED_RELEASE: { reserved: -1, total: 0 },
+  RESTOCK: { reserved: 0, total: 1 },
 };
 
 /** Counter change per unit of a commit made without a live reservation: only the total decreases. */
@@ -30,6 +31,7 @@ const LEDGER_SIGN: Readonly<Record<StockActionType, number>> = {
   RELEASED: -1,
   COMMITTED: -1,
   EXPIRED_RELEASE: -1,
+  RESTOCK: 1,
 };
 
 /**

@@ -1,5 +1,10 @@
 import { NotFoundException } from '@nestjs/common';
-import { QueryBus } from '@nestjs/cqrs';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import { Result } from '@org/shared-domain';
+import { RestockSkuCommand } from '../../application/commands/restock-sku/restock-sku.command';
+import { DuplicateRequestError } from '../../application/errors/duplicate-request.error';
+import { InvalidRestockError } from '../../domain/errors/invalid-restock.error';
 import { GetStockBySkuQuery } from '../../application/queries/get-stock-by-sku/get-stock-by-sku.query';
 import { GetStockLedgerQuery } from '../../application/queries/get-stock-ledger/get-stock-ledger.query';
 import { StockLevelReadModel } from '../../application/read-models/stock-level.read-model';
@@ -9,11 +14,14 @@ const SKU_ID = '0199a7c0-0000-7000-8000-000000000101';
 
 describe('InventoryHttpController', () => {
   let mockQueryBus: { readonly execute: jest.Mock };
+  let mockCommandBus: { readonly execute: jest.Mock };
   let controller: InventoryHttpController;
   beforeEach(() => {
     mockQueryBus = { execute: jest.fn() };
+    mockCommandBus = { execute: jest.fn() };
     controller = new InventoryHttpController(
       mockQueryBus as unknown as QueryBus,
+      mockCommandBus as unknown as CommandBus,
     );
   });
   describe('getStock', () => {
@@ -58,6 +66,64 @@ describe('InventoryHttpController', () => {
         GetStockLedgerQuery,
       );
     });
+  });
+  describe('restock', () => {
+    it('should dispatch RestockSkuCommand with the Idempotency-Key and return the new level', async () => {
+      // Arrange
+      const expectedStock: StockLevelReadModel = {
+        skuId: SKU_ID,
+        totalQuantity: 150,
+        reservedQuantity: 0,
+        availableQuantity: 150,
+        source: 'DATABASE',
+      };
+      mockCommandBus.execute.mockResolvedValue(Result.ok(expectedStock));
+      // Act
+      const actualStock: StockLevelReadModel = await controller.restock(
+        'receipt-1',
+        {
+          skuId: SKU_ID,
+          quantity: 50,
+          note: 'PO-1',
+        },
+      );
+      // Assert
+      const actualCommand: RestockSkuCommand =
+        mockCommandBus.execute.mock.calls[0][0];
+      expect(actualCommand).toMatchObject({
+        skuId: SKU_ID,
+        additionalQuantity: 50,
+        referenceNote: 'PO-1',
+        idempotencyKey: 'receipt-1',
+      });
+      expect(actualStock).toBe(expectedStock);
+    });
+    it.each([
+      {
+        inputError: new DuplicateRequestError('receipt-1'),
+        expectedType: ConflictException,
+      },
+      {
+        inputError: new InvalidRestockError('quantity'),
+        expectedType: BadRequestException,
+      },
+    ])(
+      'should map $inputError.code to $expectedType.name',
+      async ({ inputError, expectedType }) => {
+        // Arrange
+        mockCommandBus.execute.mockResolvedValue(Result.fail(inputError));
+        // Act
+        const actualCall: Promise<StockLevelReadModel> = controller.restock(
+          'receipt-1',
+          {
+            skuId: SKU_ID,
+            quantity: 1,
+          },
+        );
+        // Assert
+        await expect(actualCall).rejects.toBeInstanceOf(expectedType);
+      },
+    );
   });
   describe('getSmokeTest', () => {
     it('should report the service as ok', () => {

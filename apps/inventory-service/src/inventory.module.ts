@@ -4,7 +4,13 @@ import { RedisModule } from '@org/shared-infrastructure';
 import { KafkaModule } from '@org/shared-messaging';
 import { CommitStockHandler } from './application/commands/commit-stock/commit-stock.handler';
 import { ReleaseExpiredReservationsHandler } from './application/commands/release-expired-reservations/release-expired-reservations.handler';
+import { RelayInventoryOutboxHandler } from './application/commands/relay-inventory-outbox/relay-inventory-outbox.handler';
 import { ReleaseStockHandler } from './application/commands/release-stock/release-stock.handler';
+import { RestockSkuHandler } from './application/commands/restock-sku/restock-sku.handler';
+import { WarmUpStockCacheHandler } from './application/commands/warm-up-stock-cache/warm-up-stock-cache.handler';
+import { INVENTORY_OUTBOX_PORT } from './application/ports/inventory-outbox.token';
+import { STOCK_INBOUND_PORT } from './application/ports/stock-inbound.token';
+import { StockCacheWarmer } from './application/services/stock-cache-warmer.service';
 import { ReserveStockHandler } from './application/commands/reserve-stock/reserve-stock.handler';
 import { INVENTORY_EVENT_PUBLISHER_PORT } from './application/ports/inventory-event-publisher.token';
 import { STOCK_CACHE_PORT } from './application/ports/stock-cache.token';
@@ -15,14 +21,18 @@ import { STOCK_LEDGER_REPOSITORY_PORT } from './domain/ports/stock-ledger-reposi
 import { STOCK_RESERVATION_STORE_PORT } from './domain/ports/stock-reservation-store.token';
 import { StockLedgerPrismaRepository } from './infrastructure/persistence/ledger/stock-ledger.prisma.repository';
 import { KafkaInventoryEventPublisher } from './infrastructure/messaging/kafka-inventory-event-publisher';
+import { InventoryOutboxPrismaRepository } from './infrastructure/persistence/outbox/inventory-outbox.prisma.repository';
 import { PrismaModule } from './infrastructure/persistence/prisma/prisma.module';
+import { StockInboundPrismaRepository } from './infrastructure/persistence/stock/stock-inbound.prisma.repository';
 import { StockReadPrismaRepository } from './infrastructure/persistence/stock/stock-read.prisma.repository';
 import { RedisStockCacheAdapter } from './infrastructure/redis/redis-stock-cache.adapter';
 import { RedisInventoryRepository } from './infrastructure/redis/redis-inventory.repository';
 import { InventoryGrpcController } from './presentation/grpc/inventory-grpc.controller';
 import { InventoryHttpController } from './presentation/http/inventory-http.controller';
 import { OrderEventsConsumer } from './presentation/messaging/order-events.consumer';
+import { InventoryOutboxRelayService } from './presentation/workers/inventory-outbox-relay.service';
 import { ReservationSweeperService } from './presentation/workers/reservation-sweeper.service';
+import { StockCacheWarmupService } from './presentation/workers/stock-cache-warmup.service';
 
 /**
  * Inventory bounded context: binds the domain ports to Redis and Prisma, registers the
@@ -52,7 +62,18 @@ import { ReservationSweeperService } from './presentation/workers/reservation-sw
     },
     { provide: STOCK_CACHE_PORT, useClass: RedisStockCacheAdapter },
     { provide: STOCK_READ_PORT, useClass: StockReadPrismaRepository },
+    { provide: STOCK_INBOUND_PORT, useClass: StockInboundPrismaRepository },
+    {
+      provide: INVENTORY_OUTBOX_PORT,
+      useClass: InventoryOutboxPrismaRepository,
+    },
+    StockCacheWarmer,
+    RelayInventoryOutboxHandler,
+    InventoryOutboxRelayService,
     ReserveStockHandler,
+    RestockSkuHandler,
+    WarmUpStockCacheHandler,
+    StockCacheWarmupService,
     GetStockBySkuHandler,
     GetStockLedgerHandler,
     ReleaseStockHandler,

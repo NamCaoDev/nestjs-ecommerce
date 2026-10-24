@@ -12,7 +12,7 @@ export class StockLedgerEntryDoc implements StockLedgerEntryReadModel {
   public readonly skuId!: string;
 
   @ApiProperty({
-    enum: ['RESERVED', 'RELEASED', 'COMMITTED', 'EXPIRED_RELEASE'],
+    enum: ['RESERVED', 'RELEASED', 'COMMITTED', 'EXPIRED_RELEASE', 'RESTOCK'],
     example: 'COMMITTED',
   })
   public readonly actionType!: string;
@@ -23,11 +23,23 @@ export class StockLedgerEntryDoc implements StockLedgerEntryReadModel {
   })
   public readonly quantityChanged!: number;
 
-  @ApiProperty({ format: 'uuid' })
-  public readonly orderId!: string;
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    type: String,
+    description: 'Null for RESTOCK.',
+  })
+  public readonly orderId!: string | null;
 
-  @ApiProperty({ example: '0199a7c0-0000-7000-8000-0000000000c1:checkout-42' })
-  public readonly reservationKey!: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    example: '0199a7c0-0000-7000-8000-0000000000c1:checkout-42',
+  })
+  public readonly reservationKey!: string | null;
+
+  @ApiProperty({ nullable: true, type: String, example: 'PO-2026-0042' })
+  public readonly referenceNote!: string | null;
 
   @ApiProperty({ description: 'Epoch milliseconds.', example: 1792843950926 })
   public readonly createdAt!: number;
