@@ -27,9 +27,9 @@ twice.
 
 ## Rules and edge cases
 
-| Situation | Behaviour |
-|---|---|
-| Redis down during restock | 201 is still returned; the relay applies the receipt when Redis is back |
-| Same `Idempotency-Key` retried | 409, nothing applied twice |
-| Several receipts for one SKU | Applied in order: the claim takes the oldest unpublished event per aggregate |
-| Concurrent checkout | `HINCRBY total` is atomic with the reserve scripts |
+| Situation                      | Behaviour                                                                    |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| Redis down during restock      | 201 is still returned; the relay applies the receipt when Redis is back      |
+| Same `Idempotency-Key` retried | 409, nothing applied twice                                                   |
+| Several receipts for one SKU   | Applied in order: the claim takes the oldest unpublished event per aggregate |
+| Concurrent checkout            | `HINCRBY total` is atomic with the reserve scripts                           |

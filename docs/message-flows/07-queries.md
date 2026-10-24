@@ -12,12 +12,12 @@ aggregates and never changes state, with one exception: a stock read may repopul
 
 ## Endpoints
 
-| Endpoint | Query | Source | Errors |
-|---|---|---|---|
-| `GET /api/orders/:id` | `GetOrderByIdQuery` | order_db via `OrderReadPort` | 404 `OrderNotFoundError`, 400 invalid UUID |
-| `GET /api/orders?customerId=&page=&limit=` | `GetOrdersByCustomerQuery` | order_db, newest first | 400 invalid paging |
-| `GET /api/inventory/stocks/:skuId` | `GetStockBySkuQuery` | Redis, fallback PostgreSQL | 404 unknown SKU |
-| `GET /api/inventory/stocks/:skuId/ledger` | `GetStockLedgerQuery` | inventory_db, 50 newest movements | — |
+| Endpoint                                   | Query                      | Source                            | Errors                                     |
+| ------------------------------------------ | -------------------------- | --------------------------------- | ------------------------------------------ |
+| `GET /api/orders/:id`                      | `GetOrderByIdQuery`        | order_db via `OrderReadPort`      | 404 `OrderNotFoundError`, 400 invalid UUID |
+| `GET /api/orders?customerId=&page=&limit=` | `GetOrdersByCustomerQuery` | order_db, newest first            | 400 invalid paging                         |
+| `GET /api/inventory/stocks/:skuId`         | `GetStockBySkuQuery`       | Redis, fallback PostgreSQL        | 404 unknown SKU                            |
+| `GET /api/inventory/stocks/:skuId/ledger`  | `GetStockLedgerQuery`      | inventory_db, 50 newest movements | —                                          |
 
 ## Sequence — stock level
 

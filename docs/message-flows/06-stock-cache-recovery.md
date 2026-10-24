@@ -23,9 +23,9 @@ not be cancelled either. PostgreSQL holds the durable counters, so the cache is 
 
 ## Rules and edge cases
 
-| Situation | Behaviour |
-|---|---|
-| Hash already present | Never overwritten: Redis may be ahead of PostgreSQL by in-flight reservations |
-| Warm-up running concurrently with a restock | Snapshot + pending markers keep it exact (see flow 05) |
-| Whole Redis lost | Counters recover; **active reservations are lost**, so their units stay counted as reserved in PG (known limitation) |
-| Disable | `STOCK_CACHE_WARMUP_ENABLED=false` disables only the eager path; the lazy path always runs |
+| Situation                                   | Behaviour                                                                                                            |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Hash already present                        | Never overwritten: Redis may be ahead of PostgreSQL by in-flight reservations                                        |
+| Warm-up running concurrently with a restock | Snapshot + pending markers keep it exact (see flow 05)                                                               |
+| Whole Redis lost                            | Counters recover; **active reservations are lost**, so their units stay counted as reserved in PG (known limitation) |
+| Disable                                     | `STOCK_CACHE_WARMUP_ENABLED=false` disables only the eager path; the lazy path always runs                           |

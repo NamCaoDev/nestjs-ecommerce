@@ -21,10 +21,10 @@ emits `order.cancelled` through its outbox.
 
 ## Rules and edge cases
 
-| Situation | Behaviour |
-|---|---|
-| Redelivered event | Order already `CANCELLED` → no-op |
-| Order not `PENDING` (for example `CONFIRMED`) | `InvalidOrderStatusTransitionError` → logged and skipped |
-| Concurrent update | Optimistic `version` check; the losing write throws and Kafka redelivers |
-| Publishing `stock.reservation_failed` fails | Inventory rethrows, `order.placed` is redelivered and re-evaluated |
-| Customer notification | Not implemented: a future notification service would consume `order.cancelled` |
+| Situation                                     | Behaviour                                                                      |
+| --------------------------------------------- | ------------------------------------------------------------------------------ |
+| Redelivered event                             | Order already `CANCELLED` → no-op                                              |
+| Order not `PENDING` (for example `CONFIRMED`) | `InvalidOrderStatusTransitionError` → logged and skipped                       |
+| Concurrent update                             | Optimistic `version` check; the losing write throws and Kafka redelivers       |
+| Publishing `stock.reservation_failed` fails   | Inventory rethrows, `order.placed` is redelivered and re-evaluated             |
+| Customer notification                         | Not implemented: a future notification service would consume `order.cancelled` |

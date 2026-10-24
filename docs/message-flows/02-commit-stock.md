@@ -28,10 +28,10 @@ take the stock again. If the stock is gone, inventory tells Ordering (flow 03).
 
 ## Rules and edge cases
 
-| Situation | Behaviour |
-|---|---|
-| Redelivered `order.placed` | `{2}` from Redis; the ledger already has `COMMITTED` → no-op |
+| Situation                                   | Behaviour                                                                                 |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Redelivered `order.placed`                  | `{2}` from Redis; the ledger already has `COMMITTED` → no-op                              |
 | Crash between Redis commit and ledger write | Redelivery returns `{2}` and reconciles the ledger (`hasMovement` + partial unique index) |
-| Ordering of events per order | Same partition (key = `orderId`) and the outbox claims one event per aggregate at a time |
-| Malformed payload | Domain validation fails → logged and skipped (no poison-pill loop) |
-| `order.confirmed` / `order.cancelled` | Ignored by inventory today (see limitations in `system-design.md`) |
+| Ordering of events per order                | Same partition (key = `orderId`) and the outbox claims one event per aggregate at a time  |
+| Malformed payload                           | Domain validation fails → logged and skipped (no poison-pill loop)                        |
+| `order.confirmed` / `order.cancelled`       | Ignored by inventory today (see limitations in `system-design.md`)                        |

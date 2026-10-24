@@ -25,12 +25,12 @@ If the order never ships in that time, the reservation expires (flow 04).
 
 ## Rules and edge cases
 
-| Situation | Behaviour |
-|---|---|
-| Same key retried while the first call is still running | 409 (`PROCESSING` lock) |
-| Same key retried after success | 409 — the key is `COMPLETED` for 24 h; DB `UNIQUE (customer_id, idempotency_key)` is the backstop |
-| Same key from another customer | Independent: keys are scoped by `customerId` |
-| Crash after reservation, before the DB commit | Lock expires after 120 s; reservation expires after 15 min (flow 04) |
-| Duplicate-key error on insert | No compensation: the reservation belongs to the order already stored |
-| Concurrency | 200 parallel 1-unit orders against 100 units → exactly 100 × 201 |
-| Lines | One line per SKU, quantity > 0, same currency; prices are fixed-point (4 decimals) |
+| Situation                                              | Behaviour                                                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Same key retried while the first call is still running | 409 (`PROCESSING` lock)                                                                           |
+| Same key retried after success                         | 409 — the key is `COMPLETED` for 24 h; DB `UNIQUE (customer_id, idempotency_key)` is the backstop |
+| Same key from another customer                         | Independent: keys are scoped by `customerId`                                                      |
+| Crash after reservation, before the DB commit          | Lock expires after 120 s; reservation expires after 15 min (flow 04)                              |
+| Duplicate-key error on insert                          | No compensation: the reservation belongs to the order already stored                              |
+| Concurrency                                            | 200 parallel 1-unit orders against 100 units → exactly 100 × 201                                  |
+| Lines                                                  | One line per SKU, quantity > 0, same currency; prices are fixed-point (4 decimals)                |
