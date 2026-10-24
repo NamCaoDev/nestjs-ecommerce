@@ -51,3 +51,6 @@ Thumbs.db
 test-output
 
 .env
+
+# Prisma generated clients
+**/prisma/generated/

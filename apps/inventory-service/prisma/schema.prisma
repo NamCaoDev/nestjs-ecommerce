@@ -1,0 +1,59 @@
+// Inventory service persistence model (database-per-service: inventory_db).
+// Connection URL is configured in ../prisma.config.ts (Prisma 7).
+// Redis holds the hot-path stock counters (Lua scripts); these tables are the durable record.
+// Orders are referenced by logical UUID only: no cross-service foreign keys (CLAUDE.md §4.4).
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/infrastructure/persistence/prisma/generated"
+  moduleFormat        = "cjs"
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Kind of stock movement recorded in the ledger. EXPIRED_RELEASE: released by the sweeper.
+enum StockActionType {
+  RESERVED
+  RELEASED
+  COMMITTED
+  EXPIRED_RELEASE
+
+  @@map("stock_action_type")
+}
+
+/// Stock level of one SKU. A CHECK constraint (see migration) keeps 0 <= reserved <= total.
+model InventoryStock {
+  skuId            String        @id @map("sku_id") @db.Uuid
+  totalQuantity    Int           @map("total_quantity")
+  reservedQuantity Int           @default(0) @map("reserved_quantity")
+  /// Optimistic concurrency version, incremented on every change.
+  version          Int           @default(1)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  ledgerEntries    StockLedger[]
+
+  @@map("inventory_stocks")
+}
+
+/// Append-only audit trail of stock movements.
+model StockLedger {
+  id              String          @id @default(uuid(7)) @db.Uuid
+  skuId           String          @map("sku_id") @db.Uuid
+  /// Signed quantity: positive when reserving, negative when releasing.
+  quantityChanged Int             @map("quantity_changed")
+  actionType      StockActionType @map("action_type")
+  /// Logical reference to the order service; no foreign key.
+  orderId         String          @map("order_id") @db.Uuid
+  /// Reservation key the movement belongs to (customer-scoped Idempotency-Key).
+  reservationKey  String          @map("reservation_key") @db.VarChar(200)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  stock           InventoryStock  @relation(fields: [skuId], references: [skuId])
+
+  @@index([skuId, createdAt])
+  @@index([orderId])
+  @@index([reservationKey])
+  @@map("stock_ledger")
+}

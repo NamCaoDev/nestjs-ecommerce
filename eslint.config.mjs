@@ -8,7 +8,13 @@ export default [
   ...nx.configs['flat/typescript'],
   ...nx.configs['flat/javascript'],
   {
-    ignores: ['**/dist', '**/out-tsc', '**/test-output', '**/node_modules'],
+    ignores: [
+      '**/dist',
+      '**/out-tsc',
+      '**/test-output',
+      '**/node_modules',
+      '**/prisma/generated',
+    ],
   },
   {
     files: ['**/*.ts', '**/*.js'],
@@ -22,6 +28,11 @@ export default [
             {
               sourceTag: 'type:domain',
               onlyDependOnLibsWithTags: ['type:domain'],
+              bannedExternalImports: FORBIDDEN_DOMAIN_PACKAGES,
+            },
+            {
+              sourceTag: 'type:contracts',
+              onlyDependOnLibsWithTags: ['type:contracts'],
               bannedExternalImports: FORBIDDEN_DOMAIN_PACKAGES,
             },
             {

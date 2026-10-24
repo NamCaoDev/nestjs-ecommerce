@@ -1,0 +1,102 @@
+// Order service persistence model (database-per-service: order_db).
+// Connection URL is configured in ../prisma.config.ts (Prisma 7).
+// Cross-service references (customer, SKU) are logical UUIDs only: no foreign keys (CLAUDE.md §4.4).
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/infrastructure/persistence/prisma/generated"
+  moduleFormat        = "cjs"
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Lifecycle of an order; mirrors the domain `OrderStatus` value object exactly.
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PAYMENT_FAILED
+  CANCELLED
+
+  @@map("order_status")
+}
+
+/// Delivery state of a transactional outbox message. PROCESSING: claimed by a relay instance until locked_until.
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+
+  @@map("outbox_status")
+}
+
+/// Order aggregate root.
+model Order {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  /// Unique customer-facing reference, e.g. ORD-1A2B3C4D5E6F.
+  orderCode       String      @unique @map("order_code") @db.VarChar(32)
+  /// Logical reference to the customer service; no foreign key.
+  customerId      String      @map("customer_id") @db.Uuid
+  /// Client-supplied Idempotency-Key of the create request; unique per customer.
+  idempotencyKey  String      @map("idempotency_key") @db.VarChar(128)
+  status          OrderStatus @default(PENDING)
+  /// Immutable point-in-time snapshot of the shipping address.
+  shippingAddress Json        @map("shipping_address")
+  /// ISO 4217 currency code.
+  currency        String      @db.Char(3)
+  subtotalAmount  Decimal     @map("subtotal_amount") @db.Decimal(19, 4)
+  shippingAmount  Decimal     @default(0) @map("shipping_amount") @db.Decimal(19, 4)
+  discountAmount  Decimal     @default(0) @map("discount_amount") @db.Decimal(19, 4)
+  totalAmount     Decimal     @map("total_amount") @db.Decimal(19, 4)
+  /// Optimistic concurrency version, incremented on every update.
+  version         Int         @default(1)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  items           OrderItem[]
+
+  @@unique([customerId, idempotencyKey])
+  @@index([customerId, createdAt])
+  @@index([status])
+  @@map("orders")
+}
+
+/// Line item of an order; owned by the Order aggregate.
+model OrderItem {
+  id              String  @id @default(uuid(7)) @db.Uuid
+  orderId         String  @map("order_id") @db.Uuid
+  /// Logical reference to the inventory service; no foreign key.
+  skuId           String  @map("sku_id") @db.Uuid
+  /// Immutable snapshot of product data (name, attributes) at purchase time.
+  productSnapshot Json    @map("product_snapshot")
+  unitPrice       Decimal @map("unit_price") @db.Decimal(19, 4)
+  quantity        Int
+  lineTotal       Decimal @map("line_total") @db.Decimal(19, 4)
+  order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, skuId])
+  @@map("order_items")
+}
+
+/// Transactional outbox: written in the same transaction as the aggregate, relayed to Kafka asynchronously.
+model OutboxEvent {
+  id            String       @id @default(uuid(7)) @db.Uuid
+  aggregateType String       @map("aggregate_type") @db.VarChar(64)
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  /// Domain event name, used as the Kafka message type (e.g. `order.placed`).
+  eventType     String       @map("event_type") @db.VarChar(128)
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  retryCount    Int          @default(0) @map("retry_count")
+  lastError     String?      @map("last_error")
+  occurredAt    DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  publishedAt   DateTime?    @map("published_at") @db.Timestamptz(3)
+  /// Lease of a PROCESSING claim; an expired lease makes the message claimable again (crashed relay).
+  lockedUntil   DateTime?    @map("locked_until") @db.Timestamptz(3)
+
+  /// Supports the relay poller: oldest pending messages first.
+  @@index([status, occurredAt])
+  @@index([aggregateId])
+  @@map("outbox_events")
+}

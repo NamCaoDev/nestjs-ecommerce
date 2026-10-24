@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package inventory.v1;
+
+// Inventory service: atomic stock operations backed by Redis Lua scripts (see CLAUDE.md §4).
+service InventoryService {
+  // Atomically reserves stock for every item in the request, or for none of them.
+  // Idempotent per `idempotency_key`: retrying the same key returns the original outcome.
+  rpc ReserveStock (ReserveStockRequest) returns (ReserveStockResponse);
+  // Compensation: releases the reservation made under `idempotency_key`.
+  // Idempotent: releasing an unknown or already released reservation succeeds without effect.
+  rpc ReleaseStock (ReleaseStockRequest) returns (ReleaseStockResponse);
+}
+
+// A single SKU and the quantity to reserve.
+message StockItem {
+  // Logical SKU identifier (UUID) owned by the inventory domain.
+  string sku_id = 1;
+  // Number of units to reserve; must be greater than zero.
+  int32 quantity = 2;
+}
+
+message ReserveStockRequest {
+  // Key identifying the reservation across retries, scoped by the caller (CLAUDE.md §4.3).
+  string idempotency_key = 1;
+  // Items to reserve; the reservation is all-or-nothing.
+  repeated StockItem items = 2;
+  // Logical order identifier (UUID), recorded in the stock ledger.
+  string order_id = 3;
+}
+
+message ReserveStockResponse {
+  // True when every item was reserved.
+  bool success = 1;
+}
+
+message ReleaseStockRequest {
+  // Idempotency key of the reservation to release (same key as ReserveStockRequest).
+  string idempotency_key = 1;
+  // Items to return to available stock.
+  repeated StockItem items = 2;
+  // Logical order identifier (UUID), recorded in the stock ledger.
+  string order_id = 3;
+}
+
+message ReleaseStockResponse {
+  // True when the reservation is released (or did not exist).
+  bool success = 1;
+}

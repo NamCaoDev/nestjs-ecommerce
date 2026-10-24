@@ -1,0 +1,29 @@
+{
+  "name": "@org/order-service-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "name": "order-service-e2e",
+    "implicitDependencies": [
+      "order-service",
+      "inventory-service"
+    ],
+    "targets": {
+      "e2e": {
+        "command": "jest --passWithNoTests",
+        "outputs": [
+          "{projectRoot}/test-output/jest/coverage"
+        ],
+        "dependsOn": [
+          "order-service:build",
+          "inventory-service:build",
+          "inventory-service:serve",
+          "order-service:serve"
+        ],
+        "options": {
+          "cwd": "apps/order-service-e2e"
+        }
+      }
+    }
+  }
+}

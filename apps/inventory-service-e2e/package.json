@@ -1,0 +1,26 @@
+{
+  "name": "@org/inventory-service-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "name": "inventory-service-e2e",
+    "implicitDependencies": [
+      "inventory-service"
+    ],
+    "targets": {
+      "e2e": {
+        "command": "jest --passWithNoTests",
+        "outputs": [
+          "{projectRoot}/test-output/jest/coverage"
+        ],
+        "dependsOn": [
+          "inventory-service:build",
+          "inventory-service:serve"
+        ],
+        "options": {
+          "cwd": "apps/inventory-service-e2e"
+        }
+      }
+    }
+  }
+}
