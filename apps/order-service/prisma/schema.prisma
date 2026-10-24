@@ -100,3 +100,18 @@ model OutboxEvent {
   @@index([aggregateId])
   @@map("outbox_events")
 }
+
+/// Transactional inbox: one row per integration event processed from another service, written in the same
+/// transaction as the change it caused, so a redelivered event is recognised and skipped.
+model InboxEvent {
+  /// Event id of the integration event (envelope `eventId` / header `event-id`).
+  id          String   @id @db.VarChar(128)
+  eventType   String   @map("event_type") @db.VarChar(100)
+  /// Producing service, e.g. `payment-service`.
+  source      String   @db.VarChar(50)
+  payload     Json
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(3)
+
+  @@index([processedAt])
+  @@map("inbox_events")
+}

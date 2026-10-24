@@ -1,0 +1,11 @@
+flowchart LR
+  Agent([Customer care]):::actor
+  Payment[Payment]:::context
+  Gateway([Payment gateway]):::actor
+  Agent -- "1. command: RefundPayment (REST, Idempotency-Key)" --> Payment
+  Payment -- "2. command: refund (HTTPS, gateway of the paid charge)" --> Gateway
+  Gateway -- "3. reply: SUCCESS refund id / FAILED" --> Payment
+  Payment -- "4. reply: status, totalAmount, refundedAmount" --> Agent
+  Agent -- "5. query: GetPaymentActivities (REST)" --> Payment
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

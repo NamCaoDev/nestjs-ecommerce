@@ -68,6 +68,7 @@ export class OutboxEventMapper {
       orderId: event.aggregateId,
       customerId: event.customerId,
       finalAmount: event.totalAmount,
+      currency: event.currency,
       items: event.items,
       createdAt: event.occurredAt,
     };

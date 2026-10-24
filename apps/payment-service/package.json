@@ -1,0 +1,153 @@
+{
+  "name": "@org/payment-service",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "name": "payment-service",
+    "targets": {
+      "prune-lockfile": {
+        "dependsOn": [
+          "build"
+        ],
+        "cache": true,
+        "executor": "@nx/js:prune-lockfile",
+        "outputs": [
+          "{workspaceRoot}/apps/payment-service/dist/package.json",
+          "{workspaceRoot}/apps/payment-service/dist/package-lock.json"
+        ],
+        "options": {
+          "buildTarget": "build"
+        }
+      },
+      "copy-workspace-modules": {
+        "dependsOn": [
+          "build"
+        ],
+        "cache": true,
+        "outputs": [
+          "{workspaceRoot}/apps/payment-service/dist/workspace_modules"
+        ],
+        "executor": "@nx/js:copy-workspace-modules",
+        "options": {
+          "buildTarget": "build"
+        }
+      },
+      "prune": {
+        "dependsOn": [
+          "prune-lockfile",
+          "copy-workspace-modules"
+        ],
+        "executor": "nx:noop"
+      },
+      "serve": {
+        "continuous": true,
+        "executor": "@nx/js:node",
+        "defaultConfiguration": "development",
+        "dependsOn": [
+          "build"
+        ],
+        "readyWhen": {
+          "signal": true
+        },
+        "options": {
+          "buildTarget": "payment-service:build",
+          "runBuildTargetDependencies": false,
+          "inspect": "inspect",
+          "port": 9231
+        },
+        "configurations": {
+          "development": {
+            "buildTarget": "payment-service:build:development"
+          },
+          "production": {
+            "buildTarget": "payment-service:build:production"
+          }
+        }
+      },
+      "test": {
+        "options": {
+          "passWithNoTests": true
+        },
+        "dependsOn": [
+          "^build",
+          "prisma-generate"
+        ]
+      },
+      "prisma-generate": {
+        "executor": "nx:run-commands",
+        "cache": true,
+        "inputs": [
+          "{projectRoot}/prisma/schema.prisma",
+          "{projectRoot}/prisma.config.ts"
+        ],
+        "outputs": [
+          "{projectRoot}/src/infrastructure/persistence/prisma/generated"
+        ],
+        "options": {
+          "cwd": "{projectRoot}",
+          "command": "prisma generate"
+        }
+      },
+      "prisma-migrate": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{projectRoot}",
+          "command": "prisma migrate dev"
+        }
+      },
+      "prisma-deploy": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{projectRoot}",
+          "command": "prisma migrate deploy"
+        }
+      },
+      "build": {
+        "dependsOn": [
+          "^build",
+          "prisma-generate"
+        ]
+      },
+      "typecheck": {
+        "dependsOn": [
+          "^build",
+          "prisma-generate"
+        ]
+      },
+      "lint": {
+        "dependsOn": [
+          "prisma-generate"
+        ]
+      }
+    },
+    "tags": [
+      "scope:payment",
+      "type:app"
+    ]
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.8",
+    "@nestjs/core": "11.2.8",
+    "@nestjs/cqrs": "11.0.3",
+    "@nestjs/platform-express": "11.2.8",
+    "@nestjs/swagger": "11.4.7",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "ioredis": "6.0.0",
+    "kafkajs": "2.2.4",
+    "kafkajs-snappy": "1.1.0",
+    "pg": "8.23.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "tslib": "2.8.1",
+    "@org/contracts": "*",
+    "@org/shared-domain": "*",
+    "@org/shared-infrastructure": "*",
+    "@org/shared-messaging": "*"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.0.0"
+  }
+}

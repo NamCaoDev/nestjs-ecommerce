@@ -1,0 +1,12 @@
+flowchart LR
+  Gateway([Payment gateway]):::actor
+  Payment[Payment]:::context
+  Ordering[Ordering]:::context
+  Inventory[Inventory]:::context
+  Gateway -- "1. event: webhook (REST POST /payments/webhook/:gateway, signed)" --> Payment
+  Payment -- "2. command: ProcessWebhook (internal)" --> Payment
+  Payment -- "3. reply: 200 received / 401 / 404 / 409" --> Gateway
+  Payment -- "4. event: payment.succeeded or payment.failed (outbox → Kafka payments.events)" --> Ordering
+  Payment -- "4. event: payment.succeeded or payment.failed (outbox → Kafka payments.events)" --> Inventory
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

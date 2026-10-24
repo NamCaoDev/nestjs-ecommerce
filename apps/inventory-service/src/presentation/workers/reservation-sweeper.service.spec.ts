@@ -38,8 +38,8 @@ describe('ReservationSweeperService', () => {
     // Arrange
     mockCommandBus.execute.mockReturnValue(new Promise((): void => undefined));
     // Act
-    void service.executeSweep();
-    await service.executeSweep();
+    void service.executeRun();
+    await service.executeRun();
     // Assert
     expect(mockCommandBus.execute).toHaveBeenCalledTimes(1);
   });
@@ -47,8 +47,8 @@ describe('ReservationSweeperService', () => {
     // Arrange
     mockCommandBus.execute.mockRejectedValueOnce(new Error('Redis down'));
     // Act
-    await service.executeSweep();
-    await service.executeSweep();
+    await service.executeRun();
+    await service.executeRun();
     // Assert
     expect(service['logger'].error).toHaveBeenCalledTimes(1);
     expect(mockCommandBus.execute).toHaveBeenCalledTimes(2);

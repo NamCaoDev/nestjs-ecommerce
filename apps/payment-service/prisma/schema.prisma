@@ -1,0 +1,187 @@
+// Payment service persistence model (database-per-service: payment_db).
+// Connection URL is configured in ../prisma.config.ts (Prisma 7).
+// Orders and customers are referenced by logical UUIDs only: no cross-service foreign keys (CLAUDE.md §3.4).
+// payment_transactions and payment_audit_logs are append-only; database triggers (see the init migration)
+// reject UPDATE / DELETE / TRUNCATE of finalised ledger rows and of any audit row. The state machines of
+// payments and ledger rows, and the payment ↔ ledger consistency (checked at COMMIT), are enforced by the
+// payment_state_machine_guards migration.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/infrastructure/persistence/prisma/generated"
+  moduleFormat        = "cjs"
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Lifecycle of a payment. PAID once the successful charges cover the total; refunds move it to
+/// PARTIALLY_REFUNDED / REFUNDED.
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED
+
+  @@map("payment_status")
+}
+
+/// Direction of a ledger entry.
+enum TransactionType {
+  CHARGE
+  REFUND
+
+  @@map("transaction_type")
+}
+
+/// State of a ledger entry; SUCCESS, FAILED and CANCELLED are final and immutable.
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+
+  @@map("transaction_status")
+}
+
+/// Payment gateway that processed a ledger entry.
+enum PaymentGatewayProvider {
+  VNPAY
+  VIETQR_VA
+  MOMO
+  ZALOPAY
+  STRIPE
+  MOCK
+
+  @@map("payment_gateway_provider")
+}
+
+/// How the customer pays.
+enum PaymentChannel {
+  QR_CODE
+  DOMESTIC_BANK
+  INTERNATIONAL_CARD
+  BANK_TRANSFER
+
+  @@map("payment_channel")
+}
+
+/// Who caused an audited activity.
+enum PaymentActorType {
+  SYSTEM
+  GATEWAY
+  CUSTOMER
+  ADMIN
+
+  @@map("payment_actor_type")
+}
+
+/// Delivery state of a transactional outbox message. PROCESSING: claimed by a relay instance until locked_until.
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+
+  @@map("outbox_status")
+}
+
+/// Payment aggregate root: one payment per order.
+model Payment {
+  id             String               @id @db.Uuid
+  /// Logical reference to the order service; no foreign key. One payment per order.
+  orderId        String               @unique @map("order_id") @db.Uuid
+  /// Logical reference to the customer service; no foreign key.
+  customerId     String               @map("customer_id") @db.Uuid
+  /// Amount owed; never changes, refunds included (CHECK total_amount > 0).
+  totalAmount    Decimal              @map("total_amount") @db.Decimal(19, 4)
+  /// Sum of successful refunds (CHECK 0 <= refunded_amount <= total_amount).
+  refundedAmount Decimal              @default(0) @map("refunded_amount") @db.Decimal(19, 4)
+  /// ISO 4217 currency code.
+  currency       String               @db.VarChar(3)
+  status         PaymentStatus        @default(PENDING)
+  /// Immutable snapshot of the ordered lines `[{ skuId, quantity }]`, forwarded to the inventory with
+  /// the outcome so it can still ship or release stock whose reservation has expired.
+  lineItems      Json                 @map("line_items")
+  /// Optimistic concurrency version, incremented on every update.
+  version        Int                  @default(1)
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  transactions   PaymentTransaction[]
+  auditLogs      PaymentAuditLog[]
+
+  @@index([customerId, createdAt])
+  @@index([status])
+  @@map("payments")
+}
+
+/// Append-only financial ledger: charges and refunds. Only a PENDING row may be finalised once.
+model PaymentTransaction {
+  id                 String                 @id @db.Uuid
+  paymentId          String                 @map("payment_id") @db.Uuid
+  type               TransactionType        @default(CHARGE)
+  gateway            PaymentGatewayProvider
+  channel            PaymentChannel         @default(QR_CODE)
+  /// Reconciliation id at the gateway / bank.
+  gatewayTxId        String?                @map("gateway_tx_id") @db.VarChar(128)
+  amount             Decimal                @db.Decimal(19, 4)
+  status             TransactionStatus      @default(PENDING)
+  failureReason      String?                @map("failure_reason") @db.VarChar(500)
+  /// Key of the request that created the entry; a replay creates nothing.
+  idempotencyKey     String                 @unique @map("idempotency_key") @db.VarChar(128)
+  /// Original gateway payload (checkout action, webhook or refund response) kept for audits.
+  rawGatewayResponse Json?                  @map("raw_gateway_response")
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  payment            Payment                @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  auditLogs          PaymentAuditLog[]
+
+  @@index([gatewayTxId])
+  @@index([paymentId, createdAt])
+  @@map("payment_transactions")
+}
+
+/// Append-only activity and security log; rows can never be changed or deleted.
+model PaymentAuditLog {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  paymentId     String              @map("payment_id") @db.Uuid
+  transactionId String?             @map("transaction_id") @db.Uuid
+  /// e.g. PAYMENT_INITIATED, TRANSACTION_FINALIZED, STATE_CHANGED, WEBHOOK_SIGNATURE_MISMATCH.
+  action        String              @db.VarChar(100)
+  actorType     PaymentActorType    @map("actor_type")
+  actorId       String?             @map("actor_id") @db.VarChar(128)
+  stateFrom     String?             @map("state_from") @db.VarChar(32)
+  stateTo       String?             @map("state_to") @db.VarChar(32)
+  /// Sanitised extract: secrets and signatures are masked before storage.
+  payload       Json?
+  ipAddress     String?             @map("ip_address") @db.VarChar(64)
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  payment       Payment             @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  transaction   PaymentTransaction? @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId, createdAt])
+  @@map("payment_audit_logs")
+}
+
+/// Transactional outbox: written in the same transaction as the payment, relayed to Kafka `payments.events`.
+model OutboxEvent {
+  id            String       @id @default(uuid(7)) @db.Uuid
+  aggregateType String       @map("aggregate_type") @db.VarChar(64)
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  /// Event name, used as the Kafka message type (e.g. `payment.succeeded`).
+  eventType     String       @map("event_type") @db.VarChar(128)
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  retryCount    Int          @default(0) @map("retry_count")
+  lastError     String?      @map("last_error")
+  occurredAt    DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  publishedAt   DateTime?    @map("published_at") @db.Timestamptz(3)
+  /// Lease of a PROCESSING claim; an expired lease makes the message claimable again (crashed relay).
+  lockedUntil   DateTime?    @map("locked_until") @db.Timestamptz(3)
+
+  /// Supports the relay poller: oldest pending messages first.
+  @@index([status, occurredAt])
+  @@index([aggregateId])
+  @@map("outbox_events")
+}

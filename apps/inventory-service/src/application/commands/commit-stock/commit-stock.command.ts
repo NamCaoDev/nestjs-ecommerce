@@ -3,16 +3,16 @@ import { DomainError, Result } from '@org/shared-domain';
 import { ReservationLine } from '../../../domain/value-objects/reservation-line.type';
 
 /**
- * Command shipping the stock of a placed order. Handled by {@link CommitStockHandler}.
+ * Command shipping the stock of a paid order. Handled by {@link CommitStockHandler}.
  */
 export class CommitStockCommand extends Command<Result<void, DomainError>> {
-  /** Logical identifier of the placed order (UUID). */
+  /** Logical identifier of the paid order (UUID). */
   public readonly orderId: string;
-  /** Ordered lines from the `order.placed` event; used when the reservation is gone. */
+  /** Ordered lines from the `payment.succeeded` event; used when the reservation is gone. */
   public readonly items: readonly ReservationLine[];
 
   /**
-   * @param props - Placed order identifier and its lines.
+   * @param props - Paid order identifier and its lines.
    */
   public constructor({
     orderId,

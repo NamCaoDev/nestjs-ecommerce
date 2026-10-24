@@ -2,8 +2,9 @@
 
 ## Business narrative
 
-Sometimes `order.placed` reaches inventory after the reservation has expired, and other customers have
-bought the units in the meantime. The order was accepted but cannot be fulfilled. Inventory publishes
+Sometimes `payment.succeeded` reaches inventory after the reservation has expired (the customer paid after
+15 minutes, or Kafka was down), and other customers have bought the units in the meantime. The order was paid but
+cannot be fulfilled. Inventory publishes
 `stock.reservation_failed` with reason `EXPIRED_OUT_OF_STOCK`. Ordering then cancels the order, which
 emits `order.cancelled` through its outbox.
 
@@ -25,6 +26,7 @@ emits `order.cancelled` through its outbox.
 | --------------------------------------------- | ------------------------------------------------------------------------------ |
 | Redelivered event                             | Order already `CANCELLED` → no-op                                              |
 | Order not `PENDING` (for example `CONFIRMED`) | `InvalidOrderStatusTransitionError` → logged and skipped                       |
+| Order already `CONFIRMED` by the same payment | The customer paid and gets no stock: a refund is needed (not automated yet)    |
 | Concurrent update                             | Optimistic `version` check; the losing write throws and Kafka redelivers       |
-| Publishing `stock.reservation_failed` fails   | Inventory rethrows, `order.placed` is redelivered and re-evaluated             |
+| Publishing `stock.reservation_failed` fails   | Inventory rethrows, `payment.succeeded` is redelivered and re-evaluated        |
 | Customer notification                         | Not implemented: a future notification service would consume `order.cancelled` |

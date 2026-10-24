@@ -1,0 +1,24 @@
+sequenceDiagram
+  autonumber
+  participant K as Redpanda
+  participant CON as OrderEventsConsumer<br/>(payment-consumer-group)
+  participant H as InitiatePaymentHandler
+  participant DB as payment_db
+  participant REG as PaymentGatewayRegistry
+  participant G as Gateway adapter
+  K->>CON: order.placed { orderId, customerId, finalAmount, currency, items }
+  CON->>H: InitiatePaymentCommand(idempotencyKey = event id)
+  H->>H: OrderReference + Money (validation) → Payment.create (PENDING)
+  H->>DB: findByOrderId
+  alt payment exists (redelivery)
+    H-->>CON: existing payment
+  end
+  H->>REG: getDefault() → PAYMENT_DEFAULT_GATEWAY, PAYMENT_DEFAULT_CHANNEL
+  H->>G: initiate({ paymentId, transactionId, amount, currency, channel })
+  G-->>H: { type: QR_CODE | REDIRECT | VIRTUAL_ACCOUNT, ... }
+  H->>H: payment.initiateCharge → CHARGE PENDING + PaymentInitiatedDomainEvent
+  H->>DB: TX: payments + payment_transactions (raw_gateway_response = client action)<br/>+ payment_audit_logs (PAYMENT_INITIATED)
+  alt unique violation (concurrent consumer)
+    H->>DB: findByOrderId → return the stored payment
+  end
+  CON->>K: commit offset

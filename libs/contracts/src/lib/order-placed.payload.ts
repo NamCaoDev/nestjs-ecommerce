@@ -9,6 +9,8 @@ export interface OrderPlacedPayload {
   readonly customerId: string;
   /** Total amount charged for the order. */
   readonly finalAmount: number;
+  /** ISO 4217 currency code of every amount. */
+  readonly currency: string;
   /** Ordered SKUs with the unit price captured at purchase time. */
   readonly items: ReadonlyArray<{
     readonly skuId: string;

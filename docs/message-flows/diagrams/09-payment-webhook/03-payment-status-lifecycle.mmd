@@ -1,0 +1,10 @@
+stateDiagram-v2
+  [*] --> PENDING: order.placed → Payment.create + CHARGE PENDING
+  PENDING --> PAID: CHARGE SUCCESS, charges ≥ total (payment.succeeded)
+  PENDING --> FAILED: CHARGE FAILED / CANCELLED (payment.failed)
+  PAID --> PARTIALLY_REFUNDED: refund < total
+  PAID --> REFUNDED: refund = total
+  PARTIALLY_REFUNDED --> PARTIALLY_REFUNDED: more refunds
+  PARTIALLY_REFUNDED --> REFUNDED: refunds = total
+  FAILED --> [*]
+  REFUNDED --> [*]

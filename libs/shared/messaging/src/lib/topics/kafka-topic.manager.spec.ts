@@ -30,7 +30,6 @@ describe('KafkaTopicManager', () => {
       topics: [{ topic: inputTopic, numPartitions: 3 }],
       waitForLeaders: true,
     });
-    expect(mockAdmin.disconnect).toHaveBeenCalledTimes(1);
   });
   it('should leave an existing topic untouched', async () => {
     // Arrange
@@ -48,29 +47,38 @@ describe('KafkaTopicManager', () => {
     // Assert
     expect(mockAdmin.listTopics).toHaveBeenCalledTimes(1);
   });
-  it('should run checks of different topics one at a time on the shared admin client', async () => {
+  it('should check several topics on one admin connection, one at a time', async () => {
     // Arrange
     const actualCalls: string[] = [];
     mockAdmin.connect.mockImplementation(async (): Promise<void> => {
       actualCalls.push('connect');
     });
-    mockAdmin.disconnect.mockImplementation(async (): Promise<void> => {
-      actualCalls.push('disconnect');
+    mockAdmin.listTopics.mockImplementation(async (): Promise<string[]> => {
+      actualCalls.push('listTopics');
+      return [];
     });
+    mockAdmin.createTopics.mockImplementation(
+      async ({ topics }: { topics: { topic: string }[] }): Promise<boolean> => {
+        actualCalls.push(`create ${topics[0].topic}`);
+        return true;
+      },
+    );
     // Act
     await Promise.all([
       manager.ensureTopic({ topic: 'orders.events', numPartitions: 3 }),
-      manager.ensureTopic({ topic: 'inventory.events', numPartitions: 3 }),
+      manager.ensureTopic({ topic: 'payments.events', numPartitions: 3 }),
     ]);
     // Assert
     expect(actualCalls).toEqual([
       'connect',
-      'disconnect',
-      'connect',
-      'disconnect',
+      'listTopics',
+      'create orders.events',
+      'listTopics',
+      'create payments.events',
     ]);
+    expect(mockAdmin.disconnect).not.toHaveBeenCalled();
   });
-  it('should retry a failed check and still disconnect', async () => {
+  it('should retry a failed check on the next call', async () => {
     // Arrange
     mockAdmin.listTopics.mockRejectedValueOnce(new Error('broker down'));
     await expect(
@@ -80,6 +88,35 @@ describe('KafkaTopicManager', () => {
     await manager.ensureTopic({ topic: 'orders.events', numPartitions: 3 });
     // Assert
     expect(mockAdmin.listTopics).toHaveBeenCalledTimes(2);
-    expect(mockAdmin.disconnect).toHaveBeenCalledTimes(2);
+  });
+  it('should reconnect after a failed connection attempt', async () => {
+    // Arrange
+    mockAdmin.connect.mockRejectedValueOnce(new Error('broker down'));
+    await expect(
+      manager.ensureTopic({ topic: 'orders.events', numPartitions: 3 }),
+    ).rejects.toThrow('broker down');
+    // Act
+    await manager.ensureTopic({ topic: 'orders.events', numPartitions: 3 });
+    // Assert
+    expect(mockAdmin.connect).toHaveBeenCalledTimes(2);
+    expect(mockAdmin.createTopics).toHaveBeenCalledTimes(1);
+  });
+  describe('onModuleDestroy', () => {
+    it('should disconnect an opened admin connection once', async () => {
+      // Arrange
+      await manager.ensureTopic({ topic: 'orders.events', numPartitions: 3 });
+      // Act
+      await manager.onModuleDestroy();
+      await manager.onModuleDestroy();
+      // Assert
+      expect(mockAdmin.disconnect).toHaveBeenCalledTimes(1);
+    });
+    it('should not disconnect when no topic was ever checked', async () => {
+      // Arrange
+      // Act
+      await manager.onModuleDestroy();
+      // Assert
+      expect(mockAdmin.disconnect).not.toHaveBeenCalled();
+    });
   });
 });

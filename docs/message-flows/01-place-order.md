@@ -8,8 +8,9 @@ A customer checks out a cart. The answer must come back immediately:
 - **400**: stock is insufficient or the input is invalid.
 
 Retrying the same checkout (same `Idempotency-Key`) must never create a second order or reserve stock twice.
-Reserved stock is held for `RESERVATION_TTL_SECONDS` (15 min by default) until the order ships (flow 02).
-If the order never ships in that time, the reservation expires (flow 04).
+Reserved stock is held for `RESERVATION_TTL_SECONDS` (15 min by default) while the customer pays: `order.placed`
+opens the payment (flow 08); a successful payment ships the stock (flow 02), a failed one releases it at once
+(flow 10). If nothing happens in that time, the reservation expires (flow 04).
 
 ## Domain message flow (DDD Crew)
 

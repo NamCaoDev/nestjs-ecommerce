@@ -2,6 +2,11 @@ import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { KafkaModule } from '@org/shared-messaging';
 import { CancelOrderHandler } from './application/commands/cancel-order/cancel-order.handler';
+import { ProcessPaymentFailedHandler } from './application/commands/process-payment-failed/process-payment-failed.handler';
+import { ProcessPaymentSucceededHandler } from './application/commands/process-payment-succeeded/process-payment-succeeded.handler';
+import { INBOX_PORT } from './application/ports/inbox.token';
+import { PaymentOutcomeProcessor } from './application/services/payment-outcome-processor.service';
+import { InboxPrismaRepository } from './infrastructure/persistence/inbox/inbox.prisma.repository';
 import { ORDER_READ_PORT } from './application/ports/order-read.token';
 import { GetOrderByIdHandler } from './application/queries/get-order-by-id/get-order-by-id.handler';
 import { GetOrdersByCustomerHandler } from './application/queries/get-orders-by-customer/get-orders-by-customer.handler';
@@ -19,12 +24,14 @@ import { OutboxEventPrismaRepository } from './infrastructure/persistence/outbox
 import { PrismaModule } from './infrastructure/persistence/prisma/prisma.module';
 import { OrderController } from './presentation/http/order.controller';
 import { InventoryEventsConsumer } from './presentation/messaging/inventory-events.consumer';
+import { PaymentEventsConsumer } from './presentation/messaging/payment-events.consumer';
 import { OutboxRelayService } from './presentation/workers/outbox-relay.service';
 
 /**
  * Order bounded context: binds the domain and application ports to their adapters,
  * registers the command handlers, exposes the REST controller, runs the outbox relay and consumes
- * `inventory.events`.
+ * `inventory.events` and `payments.events` (exactly once through the transactional inbox: confirm on
+ * payment.succeeded, cancel on payment.failed).
  * `ORDER_REPOSITORY_PORT` is provided here; `IDEMPOTENCY_PORT` and `INVENTORY_RPC_PORT`
  * come from their infrastructure modules.
  */
@@ -49,7 +56,12 @@ import { OutboxRelayService } from './presentation/workers/outbox-relay.service'
     GetOrderByIdHandler,
     GetOrdersByCustomerHandler,
     CancelOrderHandler,
+    { provide: INBOX_PORT, useClass: InboxPrismaRepository },
+    PaymentOutcomeProcessor,
+    ProcessPaymentSucceededHandler,
+    ProcessPaymentFailedHandler,
     InventoryEventsConsumer,
+    PaymentEventsConsumer,
     RelayOutboxHandler,
     OutboxRelayService,
   ],

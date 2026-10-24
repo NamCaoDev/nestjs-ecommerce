@@ -36,6 +36,7 @@ describe('KafkaInventoryEventPublisher', () => {
       expect(actualInput.messages[0].headers).toEqual({
         'event-type': 'stock.reservation_failed',
         'event-id': 'e1',
+        'x-correlation-id': INPUT_EVENT.aggregateId,
       });
     });
   });

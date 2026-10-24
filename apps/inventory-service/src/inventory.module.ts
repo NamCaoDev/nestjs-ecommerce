@@ -5,6 +5,7 @@ import { KafkaModule } from '@org/shared-messaging';
 import { CommitStockHandler } from './application/commands/commit-stock/commit-stock.handler';
 import { ReleaseExpiredReservationsHandler } from './application/commands/release-expired-reservations/release-expired-reservations.handler';
 import { RelayInventoryOutboxHandler } from './application/commands/relay-inventory-outbox/relay-inventory-outbox.handler';
+import { ReleaseOrderStockHandler } from './application/commands/release-order-stock/release-order-stock.handler';
 import { ReleaseStockHandler } from './application/commands/release-stock/release-stock.handler';
 import { RestockSkuHandler } from './application/commands/restock-sku/restock-sku.handler';
 import { WarmUpStockCacheHandler } from './application/commands/warm-up-stock-cache/warm-up-stock-cache.handler';
@@ -29,15 +30,15 @@ import { RedisStockCacheAdapter } from './infrastructure/redis/redis-stock-cache
 import { RedisInventoryRepository } from './infrastructure/redis/redis-inventory.repository';
 import { InventoryGrpcController } from './presentation/grpc/inventory-grpc.controller';
 import { InventoryHttpController } from './presentation/http/inventory-http.controller';
-import { OrderEventsConsumer } from './presentation/messaging/order-events.consumer';
+import { PaymentEventsConsumer } from './presentation/messaging/payment-events.consumer';
 import { InventoryOutboxRelayService } from './presentation/workers/inventory-outbox-relay.service';
 import { ReservationSweeperService } from './presentation/workers/reservation-sweeper.service';
 import { StockCacheWarmupService } from './presentation/workers/stock-cache-warmup.service';
 
 /**
  * Inventory bounded context: binds the domain ports to Redis and Prisma, registers the
- * command handlers and exposes the gRPC controller, the `orders.events` consumer and the
- * expired-reservation sweeper.
+ * command handlers and exposes the gRPC controller, the `payments.events` consumer (commit on
+ * payment.succeeded, release on payment.failed) and the expired-reservation sweeper.
  */
 @Module({
   imports: [
@@ -79,7 +80,8 @@ import { StockCacheWarmupService } from './presentation/workers/stock-cache-warm
     ReleaseStockHandler,
     CommitStockHandler,
     ReleaseExpiredReservationsHandler,
-    OrderEventsConsumer,
+    ReleaseOrderStockHandler,
+    PaymentEventsConsumer,
     ReservationSweeperService,
   ],
 })

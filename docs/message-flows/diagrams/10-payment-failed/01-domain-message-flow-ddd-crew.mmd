@@ -1,0 +1,14 @@
+flowchart LR
+  Gateway([Payment gateway]):::actor
+  Payment[Payment]:::context
+  Ordering[Ordering]:::context
+  Inventory[Inventory]:::context
+  Kafka[(orders.events)]:::context
+  Gateway -- "1. event: webhook FAILED / CANCELLED (flow 09)" --> Payment
+  Payment -- "2. event: payment.failed (Kafka payments.events)" --> Ordering
+  Payment -- "2. event: payment.failed (Kafka payments.events)" --> Inventory
+  Ordering -- "3. command: CancelOrder (internal)" --> Ordering
+  Ordering -- "4. event: order.cancelled (outbox → Kafka)" --> Kafka
+  Inventory -- "3. command: ReleaseOrderStock (internal)" --> Inventory
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

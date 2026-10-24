@@ -1,11 +1,11 @@
 sequenceDiagram
   autonumber
   participant K as Redpanda
-  participant CON as OrderEventsConsumer
+  participant CON as PaymentEventsConsumer<br/>(inventory-payment-consumer-group)
   participant H as CommitStockHandler
   participant R as Redis
   participant DB as inventory_db
-  K->>CON: order.placed
+  K->>CON: payment.succeeded { orderId, items }
   CON->>H: CommitStockCommand(orderId, items)
   H->>R: findByOrderId → reservation key (or "order:{orderId}" for a late commit)
   H->>R: atomic_commit.lua

@@ -26,13 +26,28 @@ services:
     image: redis:7.2-alpine
     container_name: ecommerce-redis
     restart: unless-stopped
-    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD:-redis_password}', '--appendonly', 'yes']
+    command:
+      [
+        'redis-server',
+        '--requirepass',
+        '${REDIS_PASSWORD:-redis_password}',
+        '--appendonly',
+        'yes',
+      ]
     ports:
       - '${REDIS_HOST_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-redis_password}', '--no-auth-warning', 'ping']
+      test:
+        [
+          'CMD',
+          'redis-cli',
+          '-a',
+          '${REDIS_PASSWORD:-redis_password}',
+          '--no-auth-warning',
+          'ping',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,7 +77,8 @@ services:
     volumes:
       - redpanda-data:/var/lib/redpanda/data
     healthcheck:
-      test: ['CMD-SHELL', "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      test:
+        ['CMD-SHELL', "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -167,6 +183,42 @@ services:
       order-migrate:
         condition: service_completed_successfully
       inventory-service:
+        condition: service_healthy
+
+  payment-migrate:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/payment-service/Dockerfile
+      target: migrate
+    image: payment-service-migrate:local
+    environment:
+      DATABASE_URL: postgresql://payment_db_user:${SERVICE_DB_PASSWORD:-service_password}@postgres:5432/payment_db?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  payment-service:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/payment-service/Dockerfile
+      target: runtime
+    image: payment-service:local
+    container_name: ecommerce-payment-service
+    init: true
+    environment:
+      DATABASE_URL: postgresql://payment_db_user:${SERVICE_DB_PASSWORD:-service_password}@postgres:5432/payment_db?schema=public
+      KAFKA_BROKERS: redpanda:29092
+      MOCK_GATEWAY_SECRET: ${MOCK_GATEWAY_SECRET:-local-mock-gateway-secret-change-me}
+      # Local stack only: exposes POST /api/payments/mock-gateway/pay.
+      MOCK_GATEWAY_ENABLED: 'true'
+    ports:
+      - '${PAYMENT_HTTP_HOST_PORT:-3300}:3300'
+    depends_on:
+      payment-migrate:
+        condition: service_completed_successfully
+      redpanda:
         condition: service_healthy
 
 volumes:
