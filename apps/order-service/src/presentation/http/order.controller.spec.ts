@@ -1,4 +1,7 @@
-import { CommandBus } from '@nestjs/cqrs';
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import { GetOrderByIdQuery } from '../../application/queries/get-order-by-id/get-order-by-id.query';
+import { GetOrdersByCustomerQuery } from '../../application/queries/get-orders-by-customer/get-orders-by-customer.query';
+import { OrderNotFoundError } from '../../domain/errors/order-not-found.error';
 import { Result } from '@org/shared-domain';
 import { CreateOrderCommand } from '../../application/commands/create-order/create-order.command';
 import { CreateOrderOutput } from '../../application/commands/create-order/create-order.output';
@@ -6,6 +9,8 @@ import { StockReservationFailedError } from '../../application/errors/stock-rese
 import { CreateOrderResponse } from './create-order.response';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrderController } from './order.controller';
+
+const ORDER_ID = '0199a7c0-0000-7000-8000-000000000001';
 
 const INPUT_DTO: CreateOrderDto = {
   customerId: '0199a7c0-0000-7000-8000-0000000000c1',
@@ -30,10 +35,15 @@ const INPUT_DTO: CreateOrderDto = {
 
 describe('OrderController', () => {
   let mockCommandBus: { readonly execute: jest.Mock };
+  let mockQueryBus: { readonly execute: jest.Mock };
   let controller: OrderController;
   beforeEach(() => {
     mockCommandBus = { execute: jest.fn() };
-    controller = new OrderController(mockCommandBus as unknown as CommandBus);
+    mockQueryBus = { execute: jest.fn() };
+    controller = new OrderController(
+      mockCommandBus as unknown as CommandBus,
+      mockQueryBus as unknown as QueryBus,
+    );
   });
   describe('createOrder', () => {
     it('should dispatch CreateOrderCommand with the Idempotency-Key and return the summary', async () => {
@@ -70,6 +80,60 @@ describe('OrderController', () => {
       );
       // Assert
       await expect(actualCall).rejects.toBe(expectedError);
+    });
+  });
+  describe('getOrder', () => {
+    it('should dispatch GetOrderByIdQuery and return the read model', async () => {
+      // Arrange
+      const expectedOrder: { orderId: string } = { orderId: ORDER_ID };
+      mockQueryBus.execute.mockResolvedValue(Result.ok(expectedOrder));
+      // Act
+      const actualOrder: unknown = await controller.getOrder(ORDER_ID);
+      // Assert
+      const actualQuery: GetOrderByIdQuery =
+        mockQueryBus.execute.mock.calls[0][0];
+      expect(actualQuery).toBeInstanceOf(GetOrderByIdQuery);
+      expect(actualQuery.orderId).toBe(ORDER_ID);
+      expect(actualOrder).toBe(expectedOrder);
+    });
+    it('should throw OrderNotFoundError for the global filter (HTTP 404)', async () => {
+      // Arrange
+      const expectedError: OrderNotFoundError = new OrderNotFoundError(
+        ORDER_ID,
+      );
+      mockQueryBus.execute.mockResolvedValue(Result.fail(expectedError));
+      // Act
+      const actualCall: Promise<unknown> = controller.getOrder(ORDER_ID);
+      // Assert
+      await expect(actualCall).rejects.toBe(expectedError);
+    });
+  });
+  describe('listOrders', () => {
+    it('should dispatch GetOrdersByCustomerQuery with the page', async () => {
+      // Arrange
+      const expectedPage: Record<string, unknown> = {
+        items: [],
+        page: 2,
+        limit: 10,
+        total: 11,
+      };
+      mockQueryBus.execute.mockResolvedValue(expectedPage);
+      // Act
+      const actualPage: unknown = await controller.listOrders({
+        customerId: INPUT_DTO.customerId,
+        page: 2,
+        limit: 10,
+      });
+      // Assert
+      const actualQuery: GetOrdersByCustomerQuery =
+        mockQueryBus.execute.mock.calls[0][0];
+      expect(actualQuery).toBeInstanceOf(GetOrdersByCustomerQuery);
+      expect(actualQuery).toMatchObject({
+        customerId: INPUT_DTO.customerId,
+        page: 2,
+        limit: 10,
+      });
+      expect(actualPage).toBe(expectedPage);
     });
   });
   describe('getSmokeTest', () => {

@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { KafkaModule } from '@org/shared-messaging';
 import { CancelOrderHandler } from './application/commands/cancel-order/cancel-order.handler';
+import { ORDER_READ_PORT } from './application/ports/order-read.token';
+import { GetOrderByIdHandler } from './application/queries/get-order-by-id/get-order-by-id.handler';
+import { GetOrdersByCustomerHandler } from './application/queries/get-orders-by-customer/get-orders-by-customer.handler';
 import { CreateOrderHandler } from './application/commands/create-order/create-order.handler';
 import { RelayOutboxHandler } from './application/commands/relay-outbox/relay-outbox.handler';
 import { EVENT_PUBLISHER_PORT } from './application/ports/event-publisher.token';
@@ -11,6 +14,7 @@ import { InventoryGrpcModule } from './infrastructure/grpc/inventory/inventory-g
 import { IdempotencyModule } from './infrastructure/idempotency/idempotency.module';
 import { KafkaEventPublisher } from './infrastructure/messaging/kafka-event-publisher';
 import { OrderPrismaRepository } from './infrastructure/persistence/order/order-prisma.repository';
+import { OrderReadPrismaRepository } from './infrastructure/persistence/order/order-read.prisma.repository';
 import { OutboxEventPrismaRepository } from './infrastructure/persistence/outbox/outbox-event.prisma.repository';
 import { PrismaModule } from './infrastructure/persistence/prisma/prisma.module';
 import { OrderController } from './presentation/http/order.controller';
@@ -40,7 +44,10 @@ import { OutboxRelayService } from './presentation/workers/outbox-relay.service'
       useClass: OutboxEventPrismaRepository,
     },
     { provide: EVENT_PUBLISHER_PORT, useClass: KafkaEventPublisher },
+    { provide: ORDER_READ_PORT, useClass: OrderReadPrismaRepository },
     CreateOrderHandler,
+    GetOrderByIdHandler,
+    GetOrdersByCustomerHandler,
     CancelOrderHandler,
     InventoryEventsConsumer,
     RelayOutboxHandler,
