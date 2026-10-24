@@ -1,0 +1,19 @@
+flowchart LR
+  Customer([Customer]):::actor
+  Operator([Warehouse operator]):::actor
+  Clock([Clock]):::actor
+  Ordering[Ordering]:::context
+  Inventory[Inventory]:::context
+
+  Customer -- "1. command: PlaceOrder (REST)" --> Ordering
+  Ordering -- "2. command: ReserveStock (gRPC)" --> Inventory
+  Ordering -- "2b. command: ReleaseStock (gRPC, compensation)" --> Inventory
+  Ordering -- "3. event: order.placed (Kafka)" --> Inventory
+  Inventory -- "4. event: stock.reservation_failed (Kafka)" --> Ordering
+  Clock -- "5. command: ReleaseExpiredReservations (internal)" --> Inventory
+  Operator -- "6. command: RestockSku (REST)" --> Inventory
+  Customer -- "7. query: GetOrderById / GetOrdersByCustomer (REST)" --> Ordering
+  Operator -- "8. query: GetStockBySku / GetStockLedger (REST)" --> Inventory
+
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

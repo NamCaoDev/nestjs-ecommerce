@@ -1,0 +1,15 @@
+sequenceDiagram
+  autonumber
+  participant H as Reserve / Commit / GetStock handler
+  participant R as Redis
+  participant WM as StockCacheWarmer
+  participant DB as inventory_db
+  H->>R: Lua script
+  R-->>H: STOCK_NOT_LOADED
+  H->>WM: warmSkus(skuIds)
+  WM->>DB: REPEATABLE READ: counters + pending stock.restocked ids
+  WM->>R: warm_stock.lua per SKU — HSET only if the hash is absent, mark pending events applied
+  H->>R: retry the Lua script once
+  alt still missing
+    H-->>H: SKU unknown to both stores (reserve: insufficient, commit: out of stock)
+  end

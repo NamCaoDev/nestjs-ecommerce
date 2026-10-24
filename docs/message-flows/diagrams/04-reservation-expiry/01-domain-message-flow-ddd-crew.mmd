@@ -1,0 +1,7 @@
+flowchart LR
+  Clock([Clock — every 30 s]):::actor
+  Inventory[Inventory]:::context
+  Clock -- "1. command: ReleaseExpiredReservations (internal)" --> Inventory
+  Inventory -- "2. ledger: EXPIRED_RELEASE (internal)" --> Inventory
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

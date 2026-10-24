@@ -1,0 +1,9 @@
+flowchart LR
+  Boot([Service startup]):::actor
+  Ordering[Ordering]:::context
+  Inventory[Inventory]:::context
+  Boot -- "1. command: WarmUpStockCache (internal, batches of 500)" --> Inventory
+  Ordering -- "2. command: ReserveStock (gRPC) → STOCK_NOT_LOADED → warm + retry" --> Inventory
+  Inventory -- "3. command: CommitStock → STOCK_NOT_LOADED → warm + retry (internal)" --> Inventory
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

@@ -1,0 +1,17 @@
+sequenceDiagram
+  autonumber
+  participant W as ReservationSweeperService (30 s)
+  participant H as ReleaseExpiredReservationsHandler
+  participant R as Redis
+  participant DB as inventory_db
+  W->>H: ReleaseExpiredReservationsCommand
+  H->>R: TIME (Redis clock) → now
+  H->>R: ZRANGEBYSCORE inventory:reservation_expirations -inf now LIMIT 100
+  loop each expired reservation key
+    H->>R: atomic_release.lua (only while RESERVED, ZREM)
+    alt 1 RELEASED
+      H->>DB: ledger EXPIRED_RELEASE + reserved − q
+    else 0 not found / committed
+      H->>H: skip (another instance or a commit won)
+    end
+  end

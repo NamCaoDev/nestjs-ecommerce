@@ -1,0 +1,8 @@
+flowchart LR
+  Inventory[Inventory]:::context
+  Ordering[Ordering]:::context
+  Kafka[(orders.events)]:::context
+  Inventory -- "1. event: stock.reservation_failed (Kafka inventory.events, key = orderId)" --> Ordering
+  Ordering -- "2. command: CancelOrder (internal)" --> Ordering
+  Ordering -- "3. event: order.cancelled (outbox → Kafka)" --> Kafka
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

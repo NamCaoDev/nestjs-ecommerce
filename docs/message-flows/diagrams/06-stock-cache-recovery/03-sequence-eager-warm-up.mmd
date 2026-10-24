@@ -1,0 +1,11 @@
+sequenceDiagram
+  autonumber
+  participant S as StockCacheWarmupService (onApplicationBootstrap)
+  participant H as WarmUpStockCacheHandler
+  participant DB as inventory_db
+  participant R as Redis
+  S->>H: WarmUpStockCacheCommand
+  loop pages of 500 SKUs
+    H->>DB: findCountersPage
+    H->>R: warm_stock.lua (no overwrite of existing hashes)
+  end

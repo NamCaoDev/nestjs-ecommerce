@@ -1,0 +1,13 @@
+flowchart LR
+  Customer([Customer]):::actor
+  Ordering[Ordering]:::context
+  Inventory[Inventory]:::context
+  Kafka[(orders.events)]:::context
+  Customer -- "1. command: PlaceOrder (REST, Idempotency-Key)" --> Ordering
+  Ordering -- "2. command: ReserveStock (gRPC)" --> Inventory
+  Inventory -- "3. reply: success true / false" --> Ordering
+  Ordering -- "4. reply: 201 order summary / 400" --> Customer
+  Ordering -- "5. event: order.placed (outbox → Kafka)" --> Kafka
+  Ordering -. "2b. command: ReleaseStock (only if step 4 persistence fails)" .-> Inventory
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

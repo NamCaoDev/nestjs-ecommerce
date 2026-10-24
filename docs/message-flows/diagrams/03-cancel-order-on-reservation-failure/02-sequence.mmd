@@ -1,0 +1,18 @@
+sequenceDiagram
+  autonumber
+  participant K as Redpanda
+  participant CON as InventoryEventsConsumer<br/>(order-consumer-group)
+  participant H as CancelOrderHandler
+  participant DB as order_db
+  K->>CON: stock.reservation_failed { orderId, items, reason }
+  CON->>H: CancelOrderCommand(orderId, reason)
+  H->>DB: findById
+  alt not found / invalid id
+    H-->>CON: failure → log and skip
+  else already CANCELLED
+    H-->>CON: ok (idempotent)
+  else PENDING
+    H->>H: order.cancel(reason) → OrderCancelledEvent
+    H->>DB: TX: UPDATE orders SET status = CANCELLED, version + 1 WHERE version = n<br/>+ INSERT outbox(order.cancelled)
+  end
+  CON->>K: commit offset

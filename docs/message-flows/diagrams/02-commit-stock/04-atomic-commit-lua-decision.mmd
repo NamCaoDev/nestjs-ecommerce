@@ -1,0 +1,8 @@
+flowchart TD
+  S[reservation hash] -->|status COMMITTED| A["{2} ALREADY_COMMITTED"]
+  S -->|status RESERVED| B["total −= q, reserved −= q, ZREM expiry → {1} COMMITTED"]
+  S -->|missing — expired / released| C{stock hashes present?}
+  C -- no --> D["{4} STOCK_NOT_LOADED"]
+  C -- yes --> E{available >= q for every line?}
+  E -- yes --> F["total −= q, write COMMITTED marker → {3} REACQUIRED_AND_COMMITTED"]
+  E -- no --> G["{0} EXPIRED_AND_OUT_OF_STOCK"]

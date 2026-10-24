@@ -1,0 +1,19 @@
+sequenceDiagram
+  autonumber
+  actor Op as Operator
+  participant H as GetStockBySkuHandler
+  participant R as Redis
+  participant DB as inventory_db
+  Op->>H: GET /api/inventory/stocks/:skuId
+  H->>R: HGETALL inventory:stock:{sku}
+  alt present
+    H-->>Op: { total, reserved, available, source: REDIS }
+  else missing
+    H->>DB: counters
+    alt found
+      H->>R: save counters if absent
+      H-->>Op: { …, source: DATABASE }
+    else unknown
+      H-->>Op: 404
+    end
+  end

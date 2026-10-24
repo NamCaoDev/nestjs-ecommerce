@@ -1,0 +1,21 @@
+sequenceDiagram
+  autonumber
+  participant K as Redpanda
+  participant CON as OrderEventsConsumer
+  participant H as CommitStockHandler
+  participant R as Redis
+  participant DB as inventory_db
+  K->>CON: order.placed
+  CON->>H: CommitStockCommand(orderId, items)
+  H->>R: findByOrderId → reservation key (or "order:{orderId}" for a late commit)
+  H->>R: atomic_commit.lua
+  alt {4} STOCK_NOT_LOADED
+    H->>DB: read counters → warm_stock.lua → retry commit once
+  end
+  alt {1} COMMITTED / {2} ALREADY / {3} RE-ACQUIRED
+    H->>DB: hasMovement(orderId, COMMITTED)?
+    H->>DB: if not: ledger COMMITTED + counters (total − q, reserved − q)
+  else {0} EXPIRED_AND_OUT_OF_STOCK
+    H->>K: inventory.events ← stock.reservation_failed (flow 03)
+  end
+  CON->>K: commit offset

@@ -1,0 +1,10 @@
+flowchart LR
+  Ordering[Ordering]:::context
+  Relay([Outbox relay, every 1 s]):::actor
+  Inventory[Inventory]:::context
+  Relay -- "1. command: RelayOutbox (internal)" --> Ordering
+  Ordering -- "2. event: order.placed (Kafka orders.events, key = orderId)" --> Inventory
+  Inventory -- "3. command: CommitStock (internal)" --> Inventory
+  Inventory -. "4. event: stock.reservation_failed (only when expired AND out of stock)" .-> Ordering
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000
