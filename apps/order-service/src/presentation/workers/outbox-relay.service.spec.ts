@@ -52,4 +52,20 @@ describe('OutboxRelayService', () => {
     expect(service['logger'].error).toHaveBeenCalledTimes(1);
     expect(mockCommandBus.execute).toHaveBeenCalledTimes(2);
   });
+  it('should not start when OUTBOX_RELAY_ENABLED is false', async () => {
+    // Arrange
+    process.env['OUTBOX_RELAY_ENABLED'] = 'false';
+    jest
+      .spyOn(service['logger'], 'log')
+      .mockImplementation((): void => undefined);
+    // Act
+    service.onApplicationBootstrap();
+    await jest.advanceTimersByTimeAsync(5_000);
+    // Assert
+    delete process.env['OUTBOX_RELAY_ENABLED'];
+    expect(mockCommandBus.execute).not.toHaveBeenCalled();
+    expect(service['logger'].log).toHaveBeenCalledWith(
+      'Disabled by OUTBOX_RELAY_ENABLED',
+    );
+  });
 });

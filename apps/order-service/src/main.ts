@@ -1,34 +1,48 @@
-/**
- * This is not a production server yet!
- * This is only a minimal backend to get started.
- */
-
-import { Logger } from '@nestjs/common';
+import { INestApplication, Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import {
+  emitNxReadySignal,
+  readBooleanEnv,
+  readEnv,
+  setupSwagger,
+} from '@org/shared-infrastructure';
 import { AppModule } from './app.module';
 
+/** HTTP port used when `PORT` is not set. */
+const DEFAULT_PORT = '3100';
+
+/** Prefix of every HTTP route. */
+const GLOBAL_PREFIX = 'api';
+
+/**
+ * Starts the order service. With `HTTP_ENABLED=false` it runs as a worker only: no HTTP port,
+ * while the outbox relay and Kafka consumers run according to their own flags.
+ */
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app: INestApplication = await NestFactory.create(AppModule);
   app.enableShutdownHooks();
-  const globalPrefix = 'api';
-  app.setGlobalPrefix(globalPrefix);
-  const port = process.env.PORT || 3100;
-  await app.listen(port);
-  // Set when Nx waits for this server to be ready
-  if (process.env.NX_READY_SIGNAL_SOCKET) {
-    try {
-      // Function keeps TypeScript and bundlers from rewriting or bundling the import
-      const load = new Function('s', 'return import(s)') as (
-        s: string,
-      ) => Promise<{ emitReadySignal(server: unknown): boolean }>;
-      (await load('@nx/js/ready-signal')).emitReadySignal(app.getHttpServer());
-    } catch {
-      // @nx/js isn't installed
-    }
+  if (!readBooleanEnv({ name: 'HTTP_ENABLED', defaultValue: true })) {
+    await app.init();
+    Logger.log(
+      'HTTP disabled by HTTP_ENABLED: running background workers only',
+    );
+    return;
   }
+  app.setGlobalPrefix(GLOBAL_PREFIX);
+  setupSwagger({
+    app,
+    title: 'Order Service API',
+    description:
+      'Places orders (idempotent, stock reserved over gRPC) and reads them back. Errors carry a stable `code`.',
+    version: '1.0',
+    globalPrefix: GLOBAL_PREFIX,
+  });
+  const port: string = readEnv({ name: 'PORT', defaultValue: DEFAULT_PORT });
+  await app.listen(port);
+  await emitNxReadySignal(app.getHttpServer());
   Logger.log(
-    `🚀 Application is running on: http://localhost:${port}/${globalPrefix}`,
+    `🚀 Application is running on: http://localhost:${port}/${GLOBAL_PREFIX}`,
   );
 }
 
-bootstrap();
+void bootstrap();

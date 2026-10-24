@@ -4,6 +4,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { IntegrationEventEnvelope } from '@org/contracts';
+import { readBooleanEnv } from '@org/shared-infrastructure';
 import type { Consumer, EachMessagePayload } from 'kafkajs';
 import { KafkaSubscription } from './kafka-subscription.type';
 import { KafkaConsumerServiceProps } from './kafka-consumer-service.props';
@@ -43,9 +44,17 @@ export abstract class KafkaConsumerService
   }
 
   /**
-   * Starts consuming in the background.
+   * Starts consuming in the background, unless `KAFKA_CONSUMERS_ENABLED=false` (e.g. an API-only deployment).
    */
   public onApplicationBootstrap(): void {
+    if (
+      !readBooleanEnv({ name: 'KAFKA_CONSUMERS_ENABLED', defaultValue: true })
+    ) {
+      this.logger.log(
+        `Disabled by KAFKA_CONSUMERS_ENABLED; not consuming ${this.subscription.topic}`,
+      );
+      return;
+    }
     this.executeStart().catch((err: unknown): void => {
       this.logger.error(
         `Kafka consumer failed to start: ${err instanceof Error ? err.message : String(err)}`,

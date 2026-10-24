@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -18,14 +19,23 @@ const MAX_ORDER_LINES = 100;
  */
 export class CreateOrderDto {
   /** Logical customer identifier (UUID). */
+  @ApiProperty({
+    format: 'uuid',
+    example: '0199a7c0-0000-7000-8000-0000000000c1',
+  })
   @IsUUID()
   public readonly customerId!: string;
 
   /** ISO 4217 currency code of every unit price. */
+  @ApiProperty({
+    description: 'ISO 4217 code of every unit price.',
+    example: 'USD',
+  })
   @IsISO4217CurrencyCode()
   public readonly currency!: string;
 
   /** Order lines. */
+  @ApiProperty({ type: [CreateOrderItemDto], minItems: 1, maxItems: 100 })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(MAX_ORDER_LINES)
@@ -34,6 +44,7 @@ export class CreateOrderDto {
   public readonly items!: CreateOrderItemDto[];
 
   /** Shipping address snapshot. */
+  @ApiProperty({ type: ShippingAddressDto })
   @ValidateNested()
   @Type(() => ShippingAddressDto)
   public readonly shippingAddress!: ShippingAddressDto;

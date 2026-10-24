@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
 import { RelayOutboxCommand } from '../../application/commands/relay-outbox/relay-outbox.command';
-import { readEnv } from '@org/shared-infrastructure';
+import { readBooleanEnv, readEnv } from '@org/shared-infrastructure';
 
 /** Default pause between two relay runs: 1 second. */
 const DEFAULT_RELAY_INTERVAL_MS = '1000';
@@ -32,9 +32,13 @@ export class OutboxRelayService
   public constructor(private readonly commandBus: CommandBus) {}
 
   /**
-   * Starts polling the outbox.
+   * Starts polling the outbox, unless `OUTBOX_RELAY_ENABLED=false` (e.g. an API-only deployment).
    */
   public onApplicationBootstrap(): void {
+    if (!readBooleanEnv({ name: 'OUTBOX_RELAY_ENABLED', defaultValue: true })) {
+      this.logger.log('Disabled by OUTBOX_RELAY_ENABLED');
+      return;
+    }
     const intervalMs: number = Number(
       readEnv({
         name: 'OUTBOX_RELAY_INTERVAL_MS',

@@ -163,4 +163,18 @@ describe('KafkaConsumerService', () => {
     // Assert
     expect(mockConsumer.disconnect).toHaveBeenCalledTimes(expectedCalls);
   });
+  it('should not connect when KAFKA_CONSUMERS_ENABLED is false', async () => {
+    // Arrange
+    process.env['KAFKA_CONSUMERS_ENABLED'] = 'false';
+    // Act
+    consumer.onApplicationBootstrap();
+    await new Promise(setImmediate);
+    // Assert
+    delete process.env['KAFKA_CONSUMERS_ENABLED'];
+    expect(mockTopicManager.ensureTopic).not.toHaveBeenCalled();
+    expect(mockConsumer.connect).not.toHaveBeenCalled();
+    expect(consumer['logger'].log).toHaveBeenCalledWith(
+      'Disabled by KAFKA_CONSUMERS_ENABLED; not consuming orders.events',
+    );
+  });
 });

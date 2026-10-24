@@ -91,6 +91,84 @@ services:
       redpanda:
         condition: service_healthy
 
+  # ---------------------------------------------------------------------------
+  # Application services (opt-in): docker compose --profile app up -d --build
+  # Migrations run first as one-off jobs; services talk over the compose network.
+  # ---------------------------------------------------------------------------
+  order-migrate:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/order-service/Dockerfile
+      target: migrate
+    image: order-service-migrate:local
+    environment:
+      DATABASE_URL: postgresql://order_db_user:${SERVICE_DB_PASSWORD:-service_password}@postgres:5432/order_db?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  inventory-migrate:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/inventory-service/Dockerfile
+      target: migrate
+    image: inventory-service-migrate:local
+    environment:
+      DATABASE_URL: postgresql://inventory_db_user:${SERVICE_DB_PASSWORD:-service_password}@postgres:5432/inventory_db?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  inventory-service:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/inventory-service/Dockerfile
+      target: runtime
+    image: inventory-service:local
+    container_name: ecommerce-inventory-service
+    init: true
+    environment:
+      DATABASE_URL: postgresql://inventory_db_user:${SERVICE_DB_PASSWORD:-service_password}@postgres:5432/inventory_db?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
+      KAFKA_BROKERS: redpanda:29092
+      INVENTORY_GRPC_PORT: '50051'
+    ports:
+      - '${INVENTORY_HTTP_HOST_PORT:-3200}:3200'
+      - '${INVENTORY_GRPC_HOST_PORT:-50051}:50051'
+    depends_on:
+      inventory-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+
+  order-service:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: apps/order-service/Dockerfile
+      target: runtime
+    image: order-service:local
+    container_name: ecommerce-order-service
+    init: true
+    environment:
+      DATABASE_URL: postgresql://order_db_user:${SERVICE_DB_PASSWORD:-service_password}@postgres:5432/order_db?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
+      KAFKA_BROKERS: redpanda:29092
+      INVENTORY_GRPC_HOST: inventory-service
+      INVENTORY_GRPC_PORT: '50051'
+    ports:
+      - '${ORDER_HTTP_HOST_PORT:-3100}:3100'
+    depends_on:
+      order-migrate:
+        condition: service_completed_successfully
+      inventory-service:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   redis-data:

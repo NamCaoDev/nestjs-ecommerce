@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import {
   IsInt,
   IsNotEmpty,
@@ -23,16 +24,22 @@ const MAX_PRICE_DECIMAL_PLACES = 4;
  */
 export class CreateOrderItemDto {
   /** Logical SKU identifier (UUID). */
+  @ApiProperty({
+    format: 'uuid',
+    example: '0199a7c0-0000-7000-8000-000000000101',
+  })
   @IsUUID()
   public readonly skuId!: string;
 
   /** Product name captured at checkout. */
+  @ApiProperty({ maxLength: 200, example: 'Mug' })
   @IsString()
   @IsNotEmpty()
   @MaxLength(MAX_PRODUCT_NAME_LENGTH)
   public readonly productName!: string;
 
   /** Number of units. */
+  @ApiProperty({ minimum: 1, maximum: 1000, example: 2 })
   @IsInt()
   @Min(1)
   @Max(MAX_QUANTITY_PER_LINE)
@@ -43,6 +50,11 @@ export class CreateOrderItemDto {
     allowNaN: false,
     allowInfinity: false,
     maxDecimalPlaces: MAX_PRICE_DECIMAL_PLACES,
+  })
+  @ApiProperty({
+    minimum: 0,
+    description: 'Major currency units, up to 4 decimals.',
+    example: 19.99,
   })
   @Min(0)
   public readonly unitPrice!: number;

@@ -1,0 +1,20 @@
+# Keep the build context small and free of secrets and host-specific artefacts.
+.git
+**/node_modules
+**/dist
+**/out-tsc
+**/test-output
+**/coverage
+.nx
+**/.env
+!**/.env.example
+**/prisma/generated
+.idea
+.vscode
+.claude
+.agents
+.codex
+.cursor
+.gemini
+.opencode
+**/*.log

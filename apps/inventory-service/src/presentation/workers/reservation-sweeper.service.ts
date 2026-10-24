@@ -7,7 +7,7 @@ import {
 import { CommandBus } from '@nestjs/cqrs';
 import { ReleaseExpiredReservationsCommand } from '../../application/commands/release-expired-reservations/release-expired-reservations.command';
 import { ReleaseExpiredReservationsOutput } from '../../application/commands/release-expired-reservations/release-expired-reservations.output';
-import { readEnv } from '@org/shared-infrastructure';
+import { readBooleanEnv, readEnv } from '@org/shared-infrastructure';
 
 /** Default pause between two sweeps: 30 seconds. */
 const DEFAULT_SWEEP_INTERVAL_MS = '30000';
@@ -33,9 +33,18 @@ export class ReservationSweeperService
   public constructor(private readonly commandBus: CommandBus) {}
 
   /**
-   * Starts the periodic sweep.
+   * Starts the periodic sweep, unless `RESERVATION_SWEEPER_ENABLED=false` (e.g. an API-only deployment).
    */
   public onApplicationBootstrap(): void {
+    if (
+      !readBooleanEnv({
+        name: 'RESERVATION_SWEEPER_ENABLED',
+        defaultValue: true,
+      })
+    ) {
+      this.logger.log('Disabled by RESERVATION_SWEEPER_ENABLED');
+      return;
+    }
     const intervalMs: number = Number(
       readEnv({
         name: 'RESERVATION_SWEEP_INTERVAL_MS',

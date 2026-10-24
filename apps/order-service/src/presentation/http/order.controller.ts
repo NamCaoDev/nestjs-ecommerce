@@ -8,6 +8,16 @@ import {
   Query,
 } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import {
+  ApiBadRequestResponse,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiHeader,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Result } from '@org/shared-domain';
 import { CreateOrderCommand } from '../../application/commands/create-order/create-order.command';
 import { CreateOrderOutput } from '../../application/commands/create-order/create-order.output';
@@ -18,6 +28,11 @@ import type { OrdersPageReadModel } from '../../application/read-models/orders-p
 import { OrderNotFoundError } from '../../domain/errors/order-not-found.error';
 import type { CreateOrderResponse } from './create-order.response';
 import { IdempotencyKeyHeader } from './decorators/idempotency-key-header.decorator';
+import { CreateOrderResponseDoc } from './docs/create-order-response.doc';
+import { ErrorResponseDoc } from './docs/error-response.doc';
+import { OrderDoc } from './docs/order.doc';
+import { OrdersPageDoc } from './docs/orders-page.doc';
+import { SmokeTestResponseDoc } from './docs/smoke-test-response.doc';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { GetOrdersQueryDto } from './dto/get-orders.query-dto';
 import { IdempotencyKeyPipe } from './pipes/idempotency-key.pipe';
@@ -30,6 +45,7 @@ const SERVICE_NAME = 'order-service';
  * REST endpoints of the order resource. Failed results are thrown as domain errors and mapped
  * to HTTP statuses by the global `DomainErrorFilter` (409 duplicate, 400 other business errors).
  */
+@ApiTags('orders')
 @Controller('orders')
 export class OrderController {
   /**
@@ -48,6 +64,27 @@ export class OrderController {
    * @param dto - Validated order request.
    * @returns The placed order summary (HTTP 201).
    */
+  @ApiOperation({
+    summary: 'Place an order',
+    description:
+      'Reserves stock through the inventory service, then stores the order and its order.placed event in one transaction.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'Unique per customer and request (max 128 characters); retries must reuse it.',
+  })
+  @ApiCreatedResponse({ type: CreateOrderResponseDoc })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDoc,
+    description:
+      'Missing header, invalid body, business rule violation or stock not available.',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDoc,
+    description: 'Idempotency-Key already used.',
+  })
   @Post()
   public async createOrder(
     @IdempotencyKeyHeader(IdempotencyKeyPipe) idempotencyKey: string,
@@ -69,6 +106,12 @@ export class OrderController {
    * @param query - Validated `customerId`, `page` (default 1) and `limit` (default 20, max 100).
    * @returns One page of orders.
    */
+  @ApiOperation({ summary: "List a customer's orders, newest first" })
+  @ApiOkResponse({ type: OrdersPageDoc })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDoc,
+    description: 'Invalid customerId, page or limit.',
+  })
   @Get()
   public listOrders(
     @Query() query: GetOrdersQueryDto,
@@ -82,6 +125,16 @@ export class OrderController {
    * @param orderId - Order UUID.
    * @returns The order (HTTP 404 when unknown, 400 when not a UUID).
    */
+  @ApiOperation({ summary: 'Get one order' })
+  @ApiOkResponse({ type: OrderDoc })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDoc,
+    description: 'The id is not a UUID.',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDoc,
+    description: 'Unknown order.',
+  })
   @Get(':id')
   public async getOrder(
     @Param('id', ParseUUIDPipe) orderId: string,
@@ -99,6 +152,8 @@ export class OrderController {
    *
    * @returns Liveness information.
    */
+  @ApiOperation({ summary: 'Smoke test of the order controller' })
+  @ApiOkResponse({ type: SmokeTestResponseDoc })
   @Get('admin/test')
   public getSmokeTest(): SmokeTestResponse {
     return { status: 'ok', service: SERVICE_NAME, timestamp: Date.now() };
