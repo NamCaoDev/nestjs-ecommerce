@@ -1,0 +1,24 @@
+sequenceDiagram
+  autonumber
+  actor Op as Operator
+  participant API as InventoryHttpController
+  participant H as RestockSkuHandler
+  participant DB as inventory_db
+  participant W as InventoryOutboxRelay (1 s)
+  participant R as Redis
+  Op->>API: POST /api/inventory/stocks/restock { skuId, quantity, note }<br/>Idempotency-Key: receipt-1
+  API->>H: RestockSkuCommand
+  H->>H: RestockRequest.create (quantity > 0, valid UUID)
+  H->>DB: TX: UPSERT inventory_stocks total + q<br/>+ ledger RESTOCK (idempotency_key UNIQUE)<br/>+ outbox stock.restocked
+  alt unique violation on idempotency_key
+    API-->>Op: 409 Conflict
+  end
+  API-->>Op: 201 { total, reserved, available, source: DATABASE }
+  W->>DB: claimOutboxBatch (SKIP LOCKED, lease 60 s)
+  W->>R: apply_restock.lua(eventId, sku, q)
+  alt 1 APPLIED / 2 ALREADY_APPLIED / 0 SKU_NOT_CACHED
+    Note over W,R: SKU_NOT_CACHED: nothing to add — the next restore<br/>from PostgreSQL (flow 06) already includes q
+    W->>DB: markOutboxPublished
+  else Redis down
+    W->>DB: markOutboxFailed → PENDING, retried next tick
+  end

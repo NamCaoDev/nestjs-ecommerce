@@ -1,0 +1,34 @@
+sequenceDiagram
+  autonumber
+  actor C as Customer
+  participant API as OrderController
+  participant H as CreateOrderHandler
+  participant R as Redis (order)
+  participant INV as inventory-service (gRPC)
+  participant DB as order_db
+  C->>API: POST /api/orders<br/>Idempotency-Key: k
+  API->>H: CreateOrderCommand
+  H->>R: SET idempotency:order:{customer}:{k} PROCESSING NX EX 120
+  alt key already exists
+    H-->>API: DuplicateRequestError
+    API-->>C: 409 Conflict
+  end
+  H->>H: Order.create() — Money, AddressSnapshot, OrderItem invariants
+  alt invalid input
+    H->>R: release key (only while PROCESSING)
+    API-->>C: 400 Bad Request
+  end
+  H->>INV: ReserveStock(reservationKey = {customer}:{k}, orderId, items) — 3 s timeout
+  INV->>INV: atomic_reserve.lua + ledger RESERVED
+  alt success = false (insufficient stock)
+    H->>R: release key
+    API-->>C: 400 Bad Request (StockReservationFailedError)
+  end
+  H->>DB: TX: INSERT orders, order_items, outbox_events(order.placed)
+  alt persistence fails (not a duplicate key)
+    H->>INV: ReleaseStock (compensation)
+    H->>R: release key
+    API-->>C: 5xx / 400
+  end
+  H->>R: SET … COMPLETED EX 86400
+  API-->>C: 201 { orderId, orderCode, totalAmount, currency }

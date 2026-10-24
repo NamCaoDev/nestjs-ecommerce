@@ -1,0 +1,11 @@
+flowchart LR
+  Customer([Customer]):::actor
+  Operator([Operator]):::actor
+  Ordering[Ordering]:::context
+  Inventory[Inventory]:::context
+  Customer -- "1. query: GetOrderById (REST)" --> Ordering
+  Customer -- "2. query: GetOrdersByCustomer (REST, paged)" --> Ordering
+  Operator -- "3. query: GetStockBySku (REST)" --> Inventory
+  Operator -- "4. query: GetStockLedger (REST)" --> Inventory
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

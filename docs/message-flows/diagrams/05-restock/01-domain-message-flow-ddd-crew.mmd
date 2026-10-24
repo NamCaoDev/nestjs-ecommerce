@@ -1,0 +1,10 @@
+flowchart LR
+  Operator([Warehouse operator]):::actor
+  Inventory[Inventory]:::context
+  Relay([Inventory outbox relay, every 1 s]):::actor
+  Operator -- "1. command: RestockSku (REST, Idempotency-Key)" --> Inventory
+  Inventory -- "2. reply: 201 new stock level (source DATABASE)" --> Operator
+  Relay -- "3. command: RelayInventoryOutbox (internal)" --> Inventory
+  Inventory -- "4. event: stock.restocked (outbox → Redis)" --> Inventory
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

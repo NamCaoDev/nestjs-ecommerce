@@ -1,0 +1,11 @@
+flowchart TD
+  A[ReserveStock gRPC] --> B{StockReservation.create valid?}
+  B -- no --> X[INVALID_ARGUMENT]
+  B -- yes --> C[atomic_reserve.lua]
+  C -->|1 RESERVED| D[ledger RESERVED + PG counters]
+  D -->|ledger write fails| E[atomic_release.lua, rethrow]
+  C -->|2 ALREADY_RESERVED| OK[success: true]
+  C -->|0 INSUFFICIENT| NO[success: false]
+  C -->|3 STOCK_NOT_LOADED| W[StockCacheWarmer.warmSkus → retry once]
+  W --> C
+  D --> OK
