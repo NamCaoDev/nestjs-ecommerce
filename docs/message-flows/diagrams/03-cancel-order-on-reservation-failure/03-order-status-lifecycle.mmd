@@ -1,7 +1,7 @@
 stateDiagram-v2
   [*] --> PENDING: Order.create (order.placed)
-  PENDING --> CONFIRMED: confirm() (order.confirmed) — not triggered yet, awaits payment
-  PENDING --> CANCELLED: cancel(reason) (order.cancelled)
-  PENDING --> PAYMENT_FAILED: reserved for the payment saga
+  PENDING --> CONFIRMED: payment.succeeded → confirm() (order.confirmed)
+  PENDING --> CANCELLED: payment.failed or stock.reservation_failed → cancel(reason) (order.cancelled)
+  PENDING --> PAYMENT_FAILED: reserved, not used
   CONFIRMED --> [*]
   CANCELLED --> [*]

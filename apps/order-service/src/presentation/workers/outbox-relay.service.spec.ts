@@ -37,8 +37,8 @@ describe('OutboxRelayService', () => {
     // Arrange
     mockCommandBus.execute.mockReturnValue(new Promise((): void => undefined));
     // Act
-    void service.executeRelay();
-    await service.executeRelay();
+    void service.executeRun();
+    await service.executeRun();
     // Assert
     expect(mockCommandBus.execute).toHaveBeenCalledTimes(1);
   });
@@ -46,8 +46,8 @@ describe('OutboxRelayService', () => {
     // Arrange
     mockCommandBus.execute.mockRejectedValueOnce(new Error('database down'));
     // Act
-    await service.executeRelay();
-    await service.executeRelay();
+    await service.executeRun();
+    await service.executeRun();
     // Assert
     expect(service['logger'].error).toHaveBeenCalledTimes(1);
     expect(mockCommandBus.execute).toHaveBeenCalledTimes(2);

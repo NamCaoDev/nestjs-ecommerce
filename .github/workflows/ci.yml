@@ -62,16 +62,19 @@ jobs:
         run: |
           cp apps/order-service/.env.example apps/order-service/.env
           cp apps/inventory-service/.env.example apps/inventory-service/.env
+          cp apps/payment-service/.env.example apps/payment-service/.env
 
       - name: Migrate and seed
         run: |
           npx nx run order-service:prisma-deploy
           npx nx run inventory-service:prisma-deploy
+          npx nx run payment-service:prisma-deploy
           npx nx run inventory-service:seed-stock
 
       # Run one suite at a time: each suite's teardown frees the ports of the services it started.
       - run: npx nx e2e inventory-service-e2e
       - run: npx nx e2e order-service-e2e
+      - run: npx nx e2e payment-service-e2e
 
       - name: Service logs on failure
         if: failure()

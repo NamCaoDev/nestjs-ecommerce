@@ -1,0 +1,14 @@
+sequenceDiagram
+  autonumber
+  participant W as OutboxRelayService (AbstractPollingWorker, 1 s)
+  participant DB as payment_db
+  participant K as Redpanda
+  W->>DB: claimOutboxBatch(50): PENDING or lease-expired PROCESSING,<br/>oldest unpublished per aggregate, FOR UPDATE SKIP LOCKED → PROCESSING, lease 60 s
+  loop each claimed event, in order
+    W->>K: send payments.events (key = orderId, idempotent producer, acks = all)
+  end
+  alt all sent
+    W->>DB: markOutboxPublished
+  else send fails
+    W->>DB: markOutboxFailed → PENDING, retry_count + 1, last_error
+  end

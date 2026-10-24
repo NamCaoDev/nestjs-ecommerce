@@ -1,81 +1,37 @@
-import {
-  Injectable,
-  Logger,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
+import { AbstractPollingWorker } from '@org/shared-infrastructure';
 import { RelayOutboxCommand } from '../../application/commands/relay-outbox/relay-outbox.command';
-import { readBooleanEnv, readEnv } from '@org/shared-infrastructure';
 
-/** Default pause between two relay runs: 1 second. */
-const DEFAULT_RELAY_INTERVAL_MS = '1000';
+/** Pause between two relay runs when `OUTBOX_RELAY_INTERVAL_MS` is not set: 1 second. */
+const DEFAULT_RELAY_INTERVAL_MS = 1_000;
 
 /** Messages relayed per run at most. */
 const RELAY_BATCH_SIZE = 50;
 
 /**
- * Background worker polling the transactional outbox every `OUTBOX_RELAY_INTERVAL_MS`
- * (default 1 s) through {@link RelayOutboxCommand}. Runs never overlap.
+ * Background worker polling the transactional outbox through {@link RelayOutboxCommand}.
+ * Disabled with `OUTBOX_RELAY_ENABLED=false` (e.g. an API-only deployment).
  */
 @Injectable()
-export class OutboxRelayService
-  implements OnApplicationBootstrap, OnModuleDestroy
-{
-  private readonly logger: Logger = new Logger(OutboxRelayService.name);
-  private timer: NodeJS.Timeout | undefined;
-  private isRelaying: boolean = false;
-
+export class OutboxRelayService extends AbstractPollingWorker {
   /**
    * @param commandBus - CQRS command bus.
    */
-  public constructor(private readonly commandBus: CommandBus) {}
+  public constructor(private readonly commandBus: CommandBus) {
+    super({
+      enabledFlag: 'OUTBOX_RELAY_ENABLED',
+      intervalVariable: 'OUTBOX_RELAY_INTERVAL_MS',
+      defaultIntervalMs: DEFAULT_RELAY_INTERVAL_MS,
+    });
+  }
 
   /**
-   * Starts polling the outbox, unless `OUTBOX_RELAY_ENABLED=false` (e.g. an API-only deployment).
+   * Relays one batch.
    */
-  public onApplicationBootstrap(): void {
-    if (!readBooleanEnv({ name: 'OUTBOX_RELAY_ENABLED', defaultValue: true })) {
-      this.logger.log('Disabled by OUTBOX_RELAY_ENABLED');
-      return;
-    }
-    const intervalMs: number = Number(
-      readEnv({
-        name: 'OUTBOX_RELAY_INTERVAL_MS',
-        defaultValue: DEFAULT_RELAY_INTERVAL_MS,
-      }),
+  protected async executeTick(): Promise<void> {
+    await this.commandBus.execute(
+      new RelayOutboxCommand({ batchSize: RELAY_BATCH_SIZE }),
     );
-    this.timer = setInterval((): void => {
-      void this.executeRelay();
-    }, intervalMs);
-  }
-
-  /**
-   * Stops polling the outbox.
-   */
-  public onModuleDestroy(): void {
-    clearInterval(this.timer);
-  }
-
-  /**
-   * Relays one batch unless the previous run is still in progress. Unexpected failures
-   * (e.g. database down) are logged and retried on the next tick.
-   */
-  public async executeRelay(): Promise<void> {
-    if (this.isRelaying) {
-      return;
-    }
-    this.isRelaying = true;
-    try {
-      await this.commandBus.execute(
-        new RelayOutboxCommand({ batchSize: RELAY_BATCH_SIZE }),
-      );
-    } catch (err: unknown) {
-      this.logger.error(
-        `Outbox relay run failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      this.isRelaying = false;
-    }
   }
 }

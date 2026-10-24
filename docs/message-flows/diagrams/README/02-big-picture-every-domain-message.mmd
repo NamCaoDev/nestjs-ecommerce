@@ -1,19 +1,26 @@
 flowchart LR
   Customer([Customer]):::actor
   Operator([Warehouse operator]):::actor
+  Agent([Customer care]):::actor
   Clock([Clock]):::actor
+  Gateway([Payment gateway]):::actor
   Ordering[Ordering]:::context
   Inventory[Inventory]:::context
+  Payment[Payment]:::context
 
   Customer -- "1. command: PlaceOrder (REST)" --> Ordering
-  Ordering -- "2. command: ReserveStock (gRPC)" --> Inventory
-  Ordering -- "2b. command: ReleaseStock (gRPC, compensation)" --> Inventory
-  Ordering -- "3. event: order.placed (Kafka)" --> Inventory
-  Inventory -- "4. event: stock.reservation_failed (Kafka)" --> Ordering
-  Clock -- "5. command: ReleaseExpiredReservations (internal)" --> Inventory
-  Operator -- "6. command: RestockSku (REST)" --> Inventory
-  Customer -- "7. query: GetOrderById / GetOrdersByCustomer (REST)" --> Ordering
-  Operator -- "8. query: GetStockBySku / GetStockLedger (REST)" --> Inventory
+  Ordering -- "2. command: ReserveStock / ReleaseStock (gRPC)" --> Inventory
+  Ordering -- "3. event: order.placed (Kafka)" --> Payment
+  Payment -- "4. command: initiate (HTTPS)" --> Gateway
+  Gateway -- "5. event: signed webhook (REST)" --> Payment
+  Payment -- "6. event: payment.succeeded / failed (Kafka)" --> Ordering
+  Payment -- "6. event: payment.succeeded / failed (Kafka)" --> Inventory
+  Inventory -- "7. event: stock.reservation_failed (Kafka)" --> Ordering
+  Clock -- "8. command: ReleaseExpiredReservations (internal)" --> Inventory
+  Operator -- "9. command: RestockSku (REST)" --> Inventory
+  Agent -- "10. command: RefundPayment (REST)" --> Payment
+  Customer -- "11. query: orders / payment / activities (REST)" --> Ordering
+  Operator -- "12. query: GetStockBySku / GetStockLedger (REST)" --> Inventory
 
   classDef actor fill:#fef3c7,stroke:#b45309,color:#000
   classDef context fill:#e5e7eb,stroke:#374151,color:#000

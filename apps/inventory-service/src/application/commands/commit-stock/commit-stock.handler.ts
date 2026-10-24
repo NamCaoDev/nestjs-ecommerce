@@ -23,7 +23,7 @@ import { CommitStockCommand } from './commit-stock.command';
 const LATE_COMMIT_KEY_PREFIX = 'order:';
 
 /**
- * Ships the stock of a placed order:
+ * Ships the stock of a paid order (`payment.succeeded`):
  * - a live reservation is committed; an expired one is re-acquired if the stock is still available;
  * - when the stock is gone, `stock.reservation_failed` is published so the order gets cancelled;
  * - the `COMMITTED` ledger entry is reconciled on every shipped outcome, including redeliveries,
@@ -56,7 +56,7 @@ export class CommitStockHandler implements ICommandHandler<
   ) {}
 
   /**
-   * @param command - Placed order and its lines.
+   * @param command - Paid order and its lines.
    * @returns Success, or an `InvalidReservationError` when the event lines are malformed.
    */
   public async execute(
@@ -127,7 +127,7 @@ export class CommitStockHandler implements ICommandHandler<
 
   /**
    * Publishes `stock.reservation_failed`. Nothing was changed locally, so a failed publication is
-   * simply retried through the redelivery of `order.placed`.
+   * simply retried through the redelivery of `payment.succeeded`.
    */
   private async dispatchReservationFailed(
     reservation: StockReservation,

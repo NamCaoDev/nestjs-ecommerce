@@ -1,0 +1,20 @@
+sequenceDiagram
+  autonumber
+  actor A as Customer care
+  participant H as RefundPaymentHandler
+  participant DB as payment_db
+  participant G as Gateway adapter
+  A->>H: POST /api/payments/:id/refunds { amount, reason }<br/>Idempotency-Key, x-actor-id
+  H->>DB: findById (payment + ledger)
+  alt ledger has refund:{paymentId}:{key}
+    H-->>A: 200 recorded refund (replay)
+  end
+  H->>H: payment.checkRefund(amount): PAID / PARTIALLY_REFUNDED, refunded + amount ≤ total
+  H->>G: refund({ originalTransactionId, originalGatewayTxId, amount, idempotencyKey })
+  alt gateway refuses
+    H->>DB: INSERT payment_audit_logs REFUND_REJECTED_BY_GATEWAY
+    H-->>A: 502
+  end
+  H->>H: payment.applyRefund → REFUND SUCCESS entry, refundedAmount += amount,<br/>PARTIALLY_REFUNDED | REFUNDED (totalAmount unchanged)
+  H->>DB: TX: UPDATE payments (version) + INSERT payment_transactions REFUND<br/>+ INSERT audit rows (actor ADMIN)
+  H-->>A: 200 { status, totalAmount, refundedAmount }

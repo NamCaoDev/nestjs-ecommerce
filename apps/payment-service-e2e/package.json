@@ -1,0 +1,32 @@
+{
+  "name": "@org/payment-service-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "name": "payment-service-e2e",
+    "implicitDependencies": [
+      "payment-service",
+      "order-service",
+      "inventory-service"
+    ],
+    "targets": {
+      "e2e": {
+        "command": "jest --passWithNoTests",
+        "outputs": [
+          "{projectRoot}/test-output/jest/coverage"
+        ],
+        "dependsOn": [
+          "payment-service:build",
+          "order-service:build",
+          "inventory-service:build",
+          "inventory-service:serve",
+          "order-service:serve",
+          "payment-service:serve"
+        ],
+        "options": {
+          "cwd": "apps/payment-service-e2e"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+sequenceDiagram
+  autonumber
+  participant K as Redpanda
+  participant OC as order-service<br/>PaymentEventsConsumer
+  participant IC as inventory-service<br/>PaymentEventsConsumer
+  participant R as Redis
+  participant IDB as inventory_db
+  K->>OC: payment.failed { orderId, reason }
+  OC->>OC: CancelOrderCommand(reason = "PAYMENT_FAILED: <reason>")<br/>PENDING → CANCELLED + outbox(order.cancelled)
+  K->>IC: payment.failed { orderId, items }
+  IC->>R: findByOrderId → reservation
+  alt reservation still RESERVED
+    IC->>R: atomic_release.lua (reserved − q, DEL hash, ZREM expiry)
+    IC->>IDB: ledger RELEASED + counters
+  else gone (expired / released) or COMMITTED
+    IC->>IC: nothing to do
+  end

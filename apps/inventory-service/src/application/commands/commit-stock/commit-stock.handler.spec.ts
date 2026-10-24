@@ -21,7 +21,7 @@ const STORED_RESERVATION: StockReservation = StockReservation.create({
 }).getValue();
 
 /**
- * Builds the command of an `order.placed` event.
+ * Builds the command of a `payment.succeeded` event.
  */
 const createInputCommand = (): CommitStockCommand =>
   new CommitStockCommand({ orderId: PLACED_ORDER_ID, items: EVENT_ITEMS });

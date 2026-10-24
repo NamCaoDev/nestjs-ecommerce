@@ -1,0 +1,12 @@
+flowchart LR
+  Ordering[Ordering]:::context
+  Payment[Payment]:::context
+  Gateway([Payment gateway]):::actor
+  Customer([Customer]):::actor
+  Ordering -- "1. event: order.placed (Kafka orders.events)" --> Payment
+  Payment -- "2. command: initiate (HTTPS, via gateway adapter)" --> Gateway
+  Gateway -- "3. reply: client action (redirect / QR code / virtual account)" --> Payment
+  Customer -- "4. query: GetPaymentByOrderId (REST)" --> Payment
+  Payment -- "5. reply: payment PENDING + client action" --> Customer
+  classDef actor fill:#fef3c7,stroke:#b45309,color:#000
+  classDef context fill:#e5e7eb,stroke:#374151,color:#000

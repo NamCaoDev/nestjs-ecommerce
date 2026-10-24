@@ -2,6 +2,10 @@
 
 ## Business narrative
 
+The reservation also bounds the payment window: a customer who has not paid within the TTL loses the
+reserved units (a late payment is handled by flow 02 / 03). A failed payment does not wait for the expiry:
+flow 10 releases the stock at once.
+
 Sometimes stock is reserved but the order is never stored. The client may have gone away, the order
 service may have crashed, or compensation itself may have failed. Those units must not stay locked
 forever. After `RESERVATION_TTL_SECONDS` (900 s by default) an uncommitted reservation is released and

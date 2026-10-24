@@ -1,0 +1,29 @@
+sequenceDiagram
+  autonumber
+  actor G as Gateway
+  participant API as PaymentController
+  participant H as ProcessWebhookHandler
+  participant A as Gateway adapter
+  participant AU as PaymentAuditService
+  participant DB as payment_db
+  G->>API: POST /api/payments/webhook/mock<br/>raw body + x-webhook-signature
+  API->>H: ProcessWebhookCommand(gateway, headers, rawBody, ip)
+  H->>A: verifyWebhook(headers, rawBody)
+  alt signature mismatch / malformed payload
+    H->>AU: recordWebhookRejection (claimed charge, ip, user agent)
+    AU->>DB: INSERT payment_audit_logs WEBHOOK_SIGNATURE_MISMATCH | WEBHOOK_PAYLOAD_MALFORMED
+    API-->>G: 401 / 400
+  end
+  H->>DB: findByTransactionId(merchant reference)
+  alt unknown charge
+    API-->>G: 404 (gateway retries)
+  else charge already SUCCESS / FAILED / CANCELLED
+    API-->>G: 200 { received: true } (idempotent, nothing written)
+  end
+  H->>H: payment.applyTransactionResult → CHARGE final, payment PAID | FAILED,<br/>TransactionFinalized + StatusChanged domain events
+  alt reported amount ≠ charged amount
+    H->>AU: recordProtocolEvent WEBHOOK_REJECTED
+    API-->>G: 400 PAYMENT.AMOUNT_MISMATCH
+  end
+  H->>DB: TX: UPDATE payments (version) + UPDATE payment_transactions WHERE status = PENDING<br/>+ INSERT audit rows + INSERT outbox payment.succeeded | payment.failed
+  API-->>G: 200 { received: true }

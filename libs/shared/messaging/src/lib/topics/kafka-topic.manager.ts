@@ -1,18 +1,23 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
 import type { Admin, Kafka } from 'kafkajs';
 import { KAFKA_CLIENT } from '../client/kafka-client.token';
 import { TopicDefinition } from './topic-definition.type';
 
 /**
  * Makes sure topics exist with their partition count before they are produced to or consumed from,
- * so broker auto-creation (one partition) never wins. Each topic is checked once per process,
- * checks run one at a time on the shared admin client, and a failed check is retried on the next call.
+ * so broker auto-creation (one partition) never wins. Each topic is checked once per process, checks
+ * run one at a time, and a failed check is retried on the next call.
+ *
+ * The admin client connects once and stays connected until shutdown: reconnecting it right after a
+ * `disconnect` reuses a socket that is still closing and fails with "write after end", which broke
+ * every process ensuring more than one topic.
  */
 @Injectable()
-export class KafkaTopicManager {
+export class KafkaTopicManager implements OnModuleDestroy {
   private readonly admin: Admin;
   private readonly ensuredTopics: Map<string, Promise<void>> = new Map();
   private adminQueue: Promise<void> = Promise.resolve();
+  private connection: Promise<void> | undefined;
 
   /**
    * @param kafka - Shared Kafka client.
@@ -36,8 +41,18 @@ export class KafkaTopicManager {
   }
 
   /**
-   * Runs admin work one topic at a time: the admin client is shared, so a concurrent
-   * `disconnect` would cut another topic's check short.
+   * Closes the admin connection, if one was opened.
+   */
+  public async onModuleDestroy(): Promise<void> {
+    if (this.connection === undefined) {
+      return;
+    }
+    this.connection = undefined;
+    await this.admin.disconnect();
+  }
+
+  /**
+   * Runs admin work one topic at a time on the shared admin client.
    */
   private enqueueEnsure(definition: TopicDefinition): Promise<void> {
     const run: Promise<void> = this.adminQueue.then((): Promise<void> =>
@@ -55,17 +70,27 @@ export class KafkaTopicManager {
     topic,
     numPartitions,
   }: TopicDefinition): Promise<void> {
-    await this.admin.connect();
-    try {
-      const existingTopics: string[] = await this.admin.listTopics();
-      if (!existingTopics.includes(topic)) {
-        await this.admin.createTopics({
-          topics: [{ topic, numPartitions }],
-          waitForLeaders: true,
-        });
-      }
-    } finally {
-      await this.admin.disconnect();
+    await this.connectAdmin();
+    const existingTopics: string[] = await this.admin.listTopics();
+    if (existingTopics.includes(topic)) {
+      return;
     }
+    await this.admin.createTopics({
+      topics: [{ topic, numPartitions }],
+      waitForLeaders: true,
+    });
+  }
+
+  /**
+   * Connects the admin client on first use; a failed attempt is forgotten so the next check retries.
+   */
+  private connectAdmin(): Promise<void> {
+    this.connection ??= this.admin
+      .connect()
+      .catch((err: unknown): Promise<never> => {
+        this.connection = undefined;
+        return Promise.reject(err);
+      });
+    return this.connection;
   }
 }

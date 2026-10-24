@@ -35,6 +35,7 @@ describe('OutboxEventMapper', () => {
           orderId: ORDER_ID,
           customerId: '0199a7c0-0000-7000-8000-0000000000c1',
           finalAmount: 39.98,
+          currency: 'USD',
           items: [{ ...ITEM, unitPrice: 19.99 }],
           createdAt: OCCURRED_AT,
         },

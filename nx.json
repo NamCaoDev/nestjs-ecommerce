@@ -36,7 +36,8 @@
       },
       "exclude": [
         "apps/order-service-e2e/**/*",
-        "apps/inventory-service-e2e/**/*"
+        "apps/inventory-service-e2e/**/*",
+        "apps/payment-service-e2e/**/*"
       ]
     },
     {
