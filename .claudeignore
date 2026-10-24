@@ -1,0 +1,7 @@
+node_modules/
+dist/
+tmp/
+.nx/
+coverage/
+*.log
+package-lock.json
