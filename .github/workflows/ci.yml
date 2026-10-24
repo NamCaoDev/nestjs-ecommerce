@@ -10,8 +10,17 @@ permissions:
   actions: read
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NX_NO_CLOUD: true
+  NX_DAEMON: false
+
 jobs:
   main:
+    name: Format, lint, test, build, typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -19,12 +28,6 @@ jobs:
           filter: tree:0
           fetch-depth: 0
 
-      # This enables task distribution via Nx Cloud
-      # Run this command as early as possible, before dependencies are installed
-      # Learn more at https://nx.dev/docs/reference/nx-cloud-cli#npx-nxcloud-startcirun
-      - run: npx nx start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="e2e"
-
-      # Cache node_modules
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -32,9 +35,44 @@ jobs:
 
       - run: npm ci
 
-      # Prepend any command with "nx record --" to record its logs to Nx Cloud
-      - run: npx nx record -- npx nx format:check --base="remotes/origin/main"
-      - run: npx nx run-many -t lint test build typecheck e2e
-      # Nx Cloud recommends fixes for failures to help you get CI green faster. Learn more: https://nx.dev/docs/features/ci-features/self-healing-ci
-      - run: npx nx fix-ci
-        if: always()
+      - run: npx nx format:check --base="remotes/origin/main"
+      - run: npx nx run-many -t lint test build typecheck
+
+  e2e:
+    name: End-to-end (Postgres, Redis, Redpanda)
+    needs: main
+    runs-on: ubuntu-latest
+    env:
+      # Matches DATABASE_URL in the services' .env.example.
+      POSTGRES_HOST_PORT: 5433
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Start infrastructure
+        run: docker compose up -d --wait
+
+      - name: Configure services
+        run: |
+          cp apps/order-service/.env.example apps/order-service/.env
+          cp apps/inventory-service/.env.example apps/inventory-service/.env
+
+      - name: Migrate and seed
+        run: |
+          npx nx run order-service:prisma-deploy
+          npx nx run inventory-service:prisma-deploy
+          npx nx run inventory-service:seed-stock
+
+      # Run one suite at a time: each suite's teardown frees the ports of the services it started.
+      - run: npx nx e2e inventory-service-e2e
+      - run: npx nx e2e order-service-e2e
+
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
