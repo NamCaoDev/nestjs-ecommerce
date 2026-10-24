@@ -8,7 +8,9 @@ import {
 } from '@org/contracts';
 import {
   KAFKA_CLIENT,
+  IntegrationEventContext,
   KafkaConsumerService,
+  KafkaProducerService,
   KafkaTopicManager,
 } from '@org/shared-messaging';
 import { DomainError, Result } from '@org/shared-domain';
@@ -24,23 +26,26 @@ const CONSUMER_GROUP_ID = 'inventory-payment-consumer-group';
  * Inbound adapter for `payments.events` (saga choreography): `payment.succeeded` ships the order's
  * stock ({@link CommitStockCommand}, `atomic_commit.lua`); `payment.failed` returns it at once
  * ({@link ReleaseOrderStockCommand}, `atomic_release.lua`). Business refusals are logged and skipped;
- * unexpected errors propagate so Kafka redelivers the message.
+ * unexpected errors are retried, then parked in the dead-letter topic.
  */
 @Injectable()
 export class PaymentEventsConsumer extends KafkaConsumerService {
   /**
    * @param kafka - Shared Kafka client.
    * @param topicManager - Topic provisioning.
+   * @param producer - Publishes unprocessable messages to the dead-letter topic.
    * @param commandBus - CQRS command bus.
    */
   public constructor(
     @Inject(KAFKA_CLIENT) kafka: Kafka,
     topicManager: KafkaTopicManager,
+    producer: KafkaProducerService,
     private readonly commandBus: CommandBus,
   ) {
     super({
       kafka,
       topicManager,
+      producer,
       subscription: {
         topic: PAYMENTS_EVENTS_TOPIC,
         numPartitions: PAYMENTS_EVENTS_PARTITIONS,
@@ -51,9 +56,11 @@ export class PaymentEventsConsumer extends KafkaConsumerService {
 
   /**
    * @param envelope - Decoded `payments.events` message.
+   * @param context - Event id and saga correlation id.
    */
   protected async handleEnvelope(
     envelope: IntegrationEventEnvelope<Record<string, unknown>>,
+    context: IntegrationEventContext,
   ): Promise<void> {
     const command: CommitStockCommand | ReleaseOrderStockCommand | undefined =
       PaymentEventsConsumer.toCommand(envelope);
@@ -64,7 +71,7 @@ export class PaymentEventsConsumer extends KafkaConsumerService {
       await this.commandBus.execute(command);
     if (result.isFailure) {
       this.logger.warn(
-        `Skipping event ${envelope.eventId}: ${result.getError().message}`,
+        `Skipping event ${context.eventId} (correlation ${context.correlationId}): ${result.getError().message}`,
       );
     }
   }

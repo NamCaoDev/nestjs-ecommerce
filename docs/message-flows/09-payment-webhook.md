@@ -8,7 +8,9 @@ adapter of that gateway has verified its signature over the **raw** body (MOCK /
 HMAC-SHA512 `vnp_SecureHash`). Gateways retry until they get a 200, so the endpoint is idempotent.
 
 A verified SUCCESS that captures the charged amount makes the payment PAID and publishes `payment.succeeded`
-(order CONFIRMED, stock committed — flow 02). FAILED or CANCELLED makes it FAILED and publishes `payment.failed`
+(order CONFIRMED, stock committed — flow 02). The order-service applies it exactly once through its transactional
+inbox: the `inbox_events` row (key = event id) is written in the same transaction as the order change and its
+`order.confirmed` outbox row, and a redelivered event is skipped. FAILED or CANCELLED makes it FAILED and publishes `payment.failed`
 (flow 10). In development, `POST /api/payments/mock-gateway/pay` builds and signs the MOCK webhook and processes it
 through the same path.
 

@@ -10,6 +10,7 @@ import { PaymentInitiatedDomainEvent } from '../events/payment-initiated.domain-
 import { PaymentStatusChangedDomainEvent } from '../events/payment-status-changed.domain-event';
 import { PaymentTransactionFinalizedDomainEvent } from '../events/payment-transaction-finalized.domain-event';
 import { PaymentStatus } from '../types/payment-status.type';
+import { canTransitionPaymentStatus } from '../utils/can-transition-payment-status.util';
 import { Money } from '../value-objects/money.vo';
 import { OrderReference } from '../value-objects/order-reference.vo';
 import { PaymentId } from '../value-objects/payment-id.vo';
@@ -24,16 +25,13 @@ import { TransactionResult } from './transaction-result.type';
 /** Version of a newly created payment, before its first persistence. */
 const INITIAL_VERSION = 1;
 
-/** Statuses from which a refund is allowed. */
-const REFUNDABLE_STATUSES: readonly PaymentStatus[] = [
-  'PAID',
-  'PARTIALLY_REFUNDED',
-] as const;
-
 /**
  * Payment aggregate root: the payment of one order and its append-only ledger of charges and refunds.
  *
  * Invariants:
+ * - the status follows {@link PAYMENT_STATUS_TRANSITIONS}: PENDING → PAID | FAILED, PAID →
+ *   PARTIALLY_REFUNDED | REFUNDED, PARTIALLY_REFUNDED → PARTIALLY_REFUNDED | REFUNDED; FAILED and REFUNDED
+ *   are terminal;
  * - `totalAmount` is positive and never changes, refunds included;
  * - only one charge is open or successful at a time, and only while the payment is PENDING;
  * - a ledger entry is finalised once; a successful charge must capture exactly the charged amount;
@@ -185,6 +183,14 @@ export class Payment extends AggregateRoot<PaymentId> {
     if (chargeResult.isFailure) {
       return Result.fail(chargeResult.getError());
     }
+    if (this.#status !== 'PENDING') {
+      return Result.fail(
+        new InvalidPaymentStateError({
+          operation: 'apply a charge result to',
+          status: this.#status,
+        }),
+      );
+    }
     const charge: PaymentTransaction = chargeResult.getValue();
     const amountError: DomainError | undefined = this.findAmountMismatch({
       charge,
@@ -316,12 +322,9 @@ export class Payment extends AggregateRoot<PaymentId> {
   }
 
   /**
-   * Moves the payment after a charge result.
+   * Moves the PENDING payment after a charge result.
    */
   private applyChargeOutcome(charge: PaymentTransaction): void {
-    if (this.#status !== 'PENDING') {
-      return;
-    }
     if (charge.status !== 'SUCCESS') {
       this.changeStatus({ to: 'FAILED', cause: charge });
       return;
@@ -351,7 +354,7 @@ export class Payment extends AggregateRoot<PaymentId> {
    * @returns The first rule a refund of `amount` would break, or `undefined`.
    */
   private findRefundError(amount: Money): DomainError | undefined {
-    if (!REFUNDABLE_STATUSES.includes(this.#status)) {
+    if (!canTransitionPaymentStatus({ from: this.#status, to: 'REFUNDED' })) {
       return new InvalidPaymentStateError({
         operation: 'refund',
         status: this.#status,
@@ -376,6 +379,9 @@ export class Payment extends AggregateRoot<PaymentId> {
 
   /**
    * Records a status transition and its {@link PaymentStatusChangedDomainEvent}.
+   *
+   * @throws {InvalidPaymentStateError} When the state machine forbids the move (invariant violation:
+   *   every caller checks its operation first).
    */
   private changeStatus({
     to,
@@ -385,6 +391,12 @@ export class Payment extends AggregateRoot<PaymentId> {
     readonly cause: PaymentTransaction;
   }): void {
     const from: PaymentStatus = this.#status;
+    if (!canTransitionPaymentStatus({ from, to })) {
+      throw new InvalidPaymentStateError({
+        operation: `move to ${to}`,
+        status: from,
+      });
+    }
     this.#status = to;
     this.addDomainEvent(
       new PaymentStatusChangedDomainEvent({

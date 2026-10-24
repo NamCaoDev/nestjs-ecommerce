@@ -1,6 +1,6 @@
 import { CommandBus } from '@nestjs/cqrs';
 import { Result } from '@org/shared-domain';
-import { KafkaTopicManager } from '@org/shared-messaging';
+import { KafkaProducerService, KafkaTopicManager } from '@org/shared-messaging';
 import type { EachMessagePayload, Kafka } from 'kafkajs';
 import { CancelOrderCommand } from '../../application/commands/cancel-order/cancel-order.command';
 import { OrderNotFoundError } from '../../domain/errors/order-not-found.error';
@@ -13,10 +13,14 @@ const ORDER_ID = '0199a7c0-0000-7000-8000-000000000001';
  */
 const createMockPayload = (value: string | null): EachMessagePayload =>
   ({
+    topic: 'inventory.events',
+    partition: 0,
     message: {
       value: value === null ? null : Buffer.from(value),
       offset: '3',
+      headers: {},
     },
+    heartbeat: jest.fn().mockResolvedValue(undefined),
   }) as unknown as EachMessagePayload;
 
 /**
@@ -35,19 +39,35 @@ describe('InventoryEventsConsumer', () => {
   let mockCommandBus: { readonly execute: jest.Mock };
   let mockKafka: { readonly consumer: jest.Mock };
   let mockTopicManager: { readonly ensureTopic: jest.Mock };
+  let mockProducer: { readonly send: jest.Mock };
   let consumer: InventoryEventsConsumer;
   beforeEach(() => {
     mockCommandBus = { execute: jest.fn().mockResolvedValue(Result.ok()) };
-    mockKafka = { consumer: jest.fn().mockReturnValue({}) };
+    process.env['KAFKA_CONSUMER_MAX_ATTEMPTS'] = '2';
+    process.env['KAFKA_CONSUMER_RETRY_BACKOFF_MS'] = '0';
+    mockKafka = {
+      consumer: jest.fn().mockReturnValue({
+        commitOffsets: jest.fn().mockResolvedValue(undefined),
+      }),
+    };
+    mockProducer = { send: jest.fn().mockResolvedValue(undefined) };
     mockTopicManager = { ensureTopic: jest.fn().mockResolvedValue(undefined) };
     consumer = new InventoryEventsConsumer(
       mockKafka as unknown as Kafka,
       mockTopicManager as unknown as KafkaTopicManager,
+      mockProducer as unknown as KafkaProducerService,
       mockCommandBus as unknown as CommandBus,
     );
     jest
       .spyOn(consumer['logger'], 'warn')
       .mockImplementation((): void => undefined);
+    jest
+      .spyOn(consumer['logger'], 'error')
+      .mockImplementation((): void => undefined);
+  });
+  afterEach(() => {
+    delete process.env['KAFKA_CONSUMER_MAX_ATTEMPTS'];
+    delete process.env['KAFKA_CONSUMER_RETRY_BACKOFF_MS'];
   });
   it('should join the order consumer group without auto-creating topics', () => {
     // Arrange
@@ -86,7 +106,7 @@ describe('InventoryEventsConsumer', () => {
       expect(mockCommandBus.execute).not.toHaveBeenCalled();
     });
     it.each([null, 'not json'])(
-      'should skip the malformed value %p',
+      'should park the malformed value %p in the dead-letter topic',
       async (inputValue: string | null) => {
         // Arrange
         const inputPayload: EachMessagePayload = createMockPayload(inputValue);
@@ -111,16 +131,18 @@ describe('InventoryEventsConsumer', () => {
         expect.stringContaining('does not exist'),
       );
     });
-    it('should rethrow unexpected errors so Kafka redelivers the message', async () => {
+    it('should retry unexpected errors, then park the message in the dead-letter topic', async () => {
       // Arrange
-      const expectedError: Error = new Error('concurrency conflict');
-      mockCommandBus.execute.mockRejectedValue(expectedError);
+      mockCommandBus.execute.mockRejectedValue(new Error('database down'));
       // Act
-      const actualHandling: Promise<void> = consumer.handleMessage(
+      await consumer.handleMessage(
         createMockPayload(createReservationFailedValue()),
       );
       // Assert
-      await expect(actualHandling).rejects.toBe(expectedError);
+      expect(mockCommandBus.execute).toHaveBeenCalledTimes(2);
+      expect(mockProducer.send).toHaveBeenCalledWith(
+        expect.objectContaining({ topic: 'inventory.events.dlq' }),
+      );
     });
   });
 });

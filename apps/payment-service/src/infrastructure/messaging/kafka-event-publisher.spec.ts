@@ -48,6 +48,7 @@ describe('KafkaEventPublisher', () => {
       expect(actualInput.messages[0].headers).toEqual({
         'event-type': 'payment.succeeded',
         'event-id': 'e1',
+        'x-correlation-id': ORDER_ID,
       });
     });
     it('should propagate broker failures to the relay', async () => {

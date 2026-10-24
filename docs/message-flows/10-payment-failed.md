@@ -19,7 +19,8 @@ with `atomic_release.lua`.
 
 | Situation                       | Behaviour                                                                                |
 | ------------------------------- | ---------------------------------------------------------------------------------------- |
-| Redelivered `payment.failed`    | Order already `CANCELLED` → no-op; reservation gone → no ledger entry                    |
+| Redelivered `payment.failed`    | Order: event already in `inbox_events` → skipped; inventory: reservation gone → no-op    |
+| Order no longer PENDING         | Inbox row recorded, refusal logged; the offset is committed                              |
 | Reservation already expired     | Nothing to release (the sweeper did it)                                                  |
 | Reservation already `COMMITTED` | Not released (cannot happen for one payment: SUCCESS and FAILED are mutually exclusive)  |
 | Consumer groups                 | `order-payment-consumer-group` and `inventory-payment-consumer-group` read independently |

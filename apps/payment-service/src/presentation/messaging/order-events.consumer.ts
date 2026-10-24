@@ -8,7 +8,9 @@ import {
 } from '@org/contracts';
 import {
   KAFKA_CLIENT,
+  IntegrationEventContext,
   KafkaConsumerService,
+  KafkaProducerService,
   KafkaTopicManager,
 } from '@org/shared-messaging';
 import { DomainError, Result } from '@org/shared-domain';
@@ -23,23 +25,26 @@ const CONSUMER_GROUP_ID = 'payment-consumer-group';
 /**
  * Inbound adapter for `orders.events`: on `order.placed`, dispatches {@link InitiatePaymentCommand}
  * keyed by the event id, so a redelivery opens no second payment. Malformed orders are logged and
- * skipped; unexpected errors propagate so Kafka redelivers the message.
+ * skipped; unexpected errors are retried, then parked in the dead-letter topic (see KafkaConsumerService).
  */
 @Injectable()
 export class OrderEventsConsumer extends KafkaConsumerService {
   /**
    * @param kafka - Shared Kafka client.
    * @param topicManager - Topic provisioning.
+   * @param producer - Publishes unprocessable messages to the dead-letter topic.
    * @param commandBus - CQRS command bus.
    */
   public constructor(
     @Inject(KAFKA_CLIENT) kafka: Kafka,
     topicManager: KafkaTopicManager,
+    producer: KafkaProducerService,
     private readonly commandBus: CommandBus,
   ) {
     super({
       kafka,
       topicManager,
+      producer,
       subscription: {
         topic: ORDERS_EVENTS_TOPIC,
         numPartitions: ORDERS_EVENTS_PARTITIONS,
@@ -50,9 +55,11 @@ export class OrderEventsConsumer extends KafkaConsumerService {
 
   /**
    * @param envelope - Decoded `orders.events` message.
+   * @param context - Event id and saga correlation id.
    */
   protected async handleEnvelope(
     envelope: IntegrationEventEnvelope<Record<string, unknown>>,
+    context: IntegrationEventContext,
   ): Promise<void> {
     if (envelope.eventType !== ORDER_EVENT_TYPES.PLACED) {
       return;
@@ -67,12 +74,12 @@ export class OrderEventsConsumer extends KafkaConsumerService {
           amount: Number(payload['finalAmount']),
           currency: String(payload['currency']),
           items: OrderEventsConsumer.toPaymentLines(payload['items']),
-          idempotencyKey: envelope.eventId,
+          idempotencyKey: context.eventId,
         }),
       );
     if (result.isFailure) {
       this.logger.warn(
-        `Skipping event ${envelope.eventId}: ${result.getError().message}`,
+        `Skipping event ${context.eventId} (correlation ${context.correlationId}): ${result.getError().message}`,
       );
     }
   }

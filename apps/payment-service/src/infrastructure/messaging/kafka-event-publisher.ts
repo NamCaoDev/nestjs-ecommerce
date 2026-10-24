@@ -34,7 +34,8 @@ export class KafkaEventPublisher implements EventPublisherPort {
   }
 
   /**
-   * @returns The Kafka message: key `orderId`, value the event envelope, type in the headers.
+   * @returns The Kafka message: key `orderId`, value the event envelope; type, id and saga
+   *   correlation id (`orderId`) in the headers.
    */
   private static toKafkaMessage(message: OutboxMessage): Message {
     const envelope: IntegrationEventEnvelope<Record<string, unknown>> = {
@@ -47,7 +48,11 @@ export class KafkaEventPublisher implements EventPublisherPort {
     return {
       key: String(message.payload['orderId']),
       value: JSON.stringify(envelope),
-      headers: { 'event-type': message.eventType, 'event-id': message.id },
+      headers: {
+        'event-type': message.eventType,
+        'event-id': message.id,
+        'x-correlation-id': String(message.payload['orderId']),
+      },
     };
   }
 }

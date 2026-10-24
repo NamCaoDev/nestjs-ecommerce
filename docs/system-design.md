@@ -358,6 +358,13 @@ erDiagram
     int quantity
     decimal line_total
   }
+  inbox_events {
+    varchar id PK "event id of a consumed payment event"
+    varchar event_type "payment.succeeded | payment.failed"
+    varchar source "payment-service"
+    json payload
+    timestamptz processed_at
+  }
   outbox_events {
     uuid id PK "= domain event id"
     uuid aggregate_id
@@ -454,7 +461,7 @@ erDiagram
 ```
 
 `payment_transactions` has no `updated_at`: a row is inserted, and a PENDING row is finalised once. Triggers enforce
-it (§7.5). Ledger keys: `charge:{order.placed event id}` and `refund:{paymentId}:{Idempotency-Key}`.
+it (§7.5) together with the payment state machine. Ledger keys: `charge:{order.placed event id}` and `refund:{paymentId}:{Idempotency-Key}`.
 
 ### 5.4 Redis keys
 
@@ -482,8 +489,22 @@ topics. `payment.succeeded` / `payment.failed` carry the order lines (`items`), 
 or release when the reservation has expired.
 
 Every message value is an `IntegrationEventEnvelope` `{ eventId, eventType, aggregateId, occurredAt, payload }`
-(`libs/contracts`). Producers are idempotent with one in-flight request, `acks=all`, Snappy compression.
+(`libs/contracts`); headers carry `event-type`, `event-id` and `x-correlation-id` (the `orderId`, so one saga can be
+followed across services). Producers are idempotent with one in-flight request, `acks=all`, Snappy compression.
 Consumers never auto-create topics; both sides create them with the configured partition count.
+
+Every consumer extends `KafkaConsumerService` (`@org/shared-messaging`), which **commits offsets manually**, only
+once a message is settled:
+
+| Outcome of a message                          | Behaviour                                                                                |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Handled (including a logged business refusal) | Offset committed                                                                         |
+| Handler throws (database, Redis, broker down) | Retried with exponential backoff and heartbeats, up to `KAFKA_CONSUMER_MAX_ATTEMPTS`     |
+| Still failing after the last attempt          | Parked in `<topic>.dlq` (reason, error, attempts, original value), then offset committed |
+| Undecodable value                             | Parked in `<topic>.dlq` (`MALFORMED`), then offset committed                             |
+| The dead-letter publish itself fails          | Nothing committed: Kafka redelivers the message                                          |
+
+The handler receives the envelope and its context (`eventId`, `correlationId`, topic, partition, offset).
 
 Internal (non-Kafka) events: `stock.restocked` lives only in the inventory outbox and is applied to Redis. Payment
 domain events (`payment.initiated`, `payment.transaction_finalized`, `payment.status_changed`) feed the activity log;
@@ -519,18 +540,18 @@ flowchart LR
 
 ### 7.3 Idempotency
 
-| Operation                        | Mechanism                                                                                    |
-| -------------------------------- | -------------------------------------------------------------------------------------------- |
-| `POST /orders`                   | Redis `SET NX EX` per customer + key; DB `UNIQUE (customer_id, idempotency_key)` as backstop |
-| `ReserveStock`                   | Reservation hash per `{customerId}:{key}`; replay returns `ALREADY_RESERVED`                 |
-| `ReleaseStock`                   | Only acts while `RESERVED`                                                                   |
-| `order.placed` consumption       | payment-service: `payments.order_id` UNIQUE + ledger key `charge:{eventId}`                  |
-| `payment.succeeded` consumption  | inventory: `COMMITTED` marker in Redis + partial unique index; order: already `CONFIRMED`    |
-| `payment.failed` consumption     | inventory: release only acts while `RESERVED`; order: already `CANCELLED`                    |
-| Gateway webhook                  | A final charge acknowledges retries with 200; concurrent deliveries → version conflict (409) |
-| `POST /payments/:id/refunds`     | Ledger key `refund:{paymentId}:{Idempotency-Key}`: a replay returns the recorded refund      |
-| `POST /inventory/stocks/restock` | `stock_ledger.idempotency_key` UNIQUE → 409                                                  |
-| `stock.restocked` apply          | `inventory:applied_restock:{eventId}` marker, atomic with `HINCRBY`                          |
+| Operation                        | Mechanism                                                                                                                                                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /orders`                   | Redis `SET NX EX` per customer + key; DB `UNIQUE (customer_id, idempotency_key)` as backstop                                                                                                                  |
+| `ReserveStock`                   | Reservation hash per `{customerId}:{key}`; replay returns `ALREADY_RESERVED`                                                                                                                                  |
+| `ReleaseStock`                   | Only acts while `RESERVED`                                                                                                                                                                                    |
+| `order.placed` consumption       | payment-service: `payments.order_id` UNIQUE + ledger key `charge:{eventId}`                                                                                                                                   |
+| `payment.succeeded` consumption  | order: transactional inbox (`inbox_events` PK = event id, written with the order change); inventory: `COMMITTED` reservation in Redis, durable ledger check when Redis forgot the order, partial unique index |
+| `payment.failed` consumption     | order: transactional inbox; inventory: release only acts while `RESERVED`                                                                                                                                     |
+| Gateway webhook                  | A final charge acknowledges retries with 200; concurrent deliveries → version conflict (409)                                                                                                                  |
+| `POST /payments/:id/refunds`     | Ledger key `refund:{paymentId}:{Idempotency-Key}`: a replay returns the recorded refund                                                                                                                       |
+| `POST /inventory/stocks/restock` | `stock_ledger.idempotency_key` UNIQUE → 409                                                                                                                                                                   |
+| `stock.restocked` apply          | `inventory:applied_restock:{eventId}` marker, atomic with `HINCRBY`                                                                                                                                           |
 
 ### 7.4 Deliberate exceptions
 
@@ -542,22 +563,39 @@ flowchart LR
   (`ReleaseStock`) runs if persisting the order fails, except on a duplicate key (the reservation then belongs
   to the order already stored).
 
-### 7.5 Append-only payment ledger and activity log
+### 7.5 Payment state machines, append-only ledger and activity log
 
-| Guarantee                                                | Domain (`Payment`, `PaymentTransaction`)              | Database (triggers / CHECK, init migration)                                  |
-| -------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------- |
-| A final entry (SUCCESS, FAILED, CANCELLED) never changes | `finalize` throws `TransactionAlreadyFinalizedError`  | `payment_transactions_guard`: UPDATE / DELETE of a final row raises          |
-| A PENDING entry only gets its outcome                    | No setters; `finalize` once                           | Same trigger: id, payment, type, gateway, amount, key, created_at are frozen |
-| The activity log is never changed                        | Rows are only appended                                | `payment_audit_logs_guard`: every UPDATE / DELETE raises                     |
-| No bulk wipe                                             | —                                                     | `BEFORE TRUNCATE` triggers on both tables                                    |
-| `totalAmount` never changes; refunds never exceed it     | `applyRefund` / `checkRefund` invariants              | `payments_refunded_amount_range` CHECK                                       |
-| A success captures exactly the charged amount            | `AmountMismatchError` (audited as `WEBHOOK_REJECTED`) | —                                                                            |
+| Payment status       | Allowed next statuses            |
+| -------------------- | -------------------------------- |
+| `PENDING`            | `PAID`, `FAILED`                 |
+| `PAID`               | `PARTIALLY_REFUNDED`, `REFUNDED` |
+| `PARTIALLY_REFUNDED` | `PARTIALLY_REFUNDED`, `REFUNDED` |
+| `REFUNDED`, `FAILED` | — (terminal)                     |
 
-The repository inserts new ledger rows and finalises PENDING rows with `UPDATE … WHERE status = 'PENDING'`; payment
-row, ledger rows, activity rows and outbox rows are written in one `$transaction`. Activity rows come from the domain
-events through synchronous audit handlers, so they commit or roll back with the change they describe. Protocol
-events that change nothing (bad signature, malformed payload, gateway refusal) are appended by `PaymentAuditService`
-with the caller IP and sanitised request metadata.
+Ledger entries: a CHARGE is created `PENDING` and moves once to `SUCCESS`, `FAILED` or `CANCELLED`; a REFUND is
+created `SUCCESS` (the gateway already confirmed it). Both tables live in the domain
+(`PAYMENT_STATUS_TRANSITIONS`, `TRANSACTION_STATUS_TRANSITIONS`) and are mirrored by the database, so a
+direct SQL write cannot break them either.
+
+| Guarantee                                                        | Domain (`Payment`, `PaymentTransaction`)                       | Database (payment_db migrations)                                                                                                                                |
+| ---------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Payment status follows the state machine                         | `canTransitionPaymentStatus`; every operation checks its state | `payments_guard`: other transitions raise                                                                                                                       |
+| A payment is created `PENDING`, nothing refunded; never deleted  | `Payment.create`                                               | `payments_guard` on INSERT / DELETE                                                                                                                             |
+| Amount owed, order, customer, lines never change                 | Read-only properties                                           | `payments_guard`: those columns are frozen                                                                                                                      |
+| `refunded_amount` only grows and never exceeds the total         | `applyRefund` / `checkRefund`                                  | `payments_guard` (no decrease) + `payments_refunded_amount_range` CHECK                                                                                         |
+| Every update bumps `version` (optimistic locking)                | Repository `version: { increment: 1 }`                         | `payments_guard`                                                                                                                                                |
+| CHARGE created `PENDING` without gateway id; REFUND `SUCCESS`    | `createPendingCharge`, `createSucceededRefund`                 | `payment_transactions_insert_guard`, `payment_transactions_refund_is_success` CHECK                                                                             |
+| A final entry never changes; a PENDING one only gets its outcome | `finalize` throws `TransactionAlreadyFinalizedError`           | `payment_transactions_guard` (UPDATE / DELETE), TRUNCATE triggers                                                                                               |
+| A final entry has a gateway id                                   | `finalize` requires it                                         | `payment_transactions_final_has_gateway_tx_id` CHECK                                                                                                            |
+| Payment status and `refunded_amount` match the ledger            | Derived from the ledger by the aggregate                       | Deferred constraint triggers, checked at COMMIT: e.g. PAID ⇔ successful charges cover the total, `refunded_amount` = Σ refunds, at most one open or paid charge |
+| The activity log is never changed                                | Rows are only appended                                         | `payment_audit_logs_guard`, TRUNCATE trigger                                                                                                                    |
+| A success captures exactly the charged amount                    | `AmountMismatchError` (audited as `WEBHOOK_REJECTED`)          | —                                                                                                                                                               |
+
+The repository writes the payment row, new ledger rows, PENDING rows just finalised (`UPDATE … WHERE status =
+'PENDING'`), activity rows and outbox rows in one `$transaction`, so the deferred consistency check sees the
+complete change. Activity rows come from the domain events through synchronous audit handlers, so they commit or
+roll back with the change they describe. Protocol events that change nothing (bad signature, malformed payload,
+gateway refusal) are appended by `PaymentAuditService` with the caller IP and sanitised request metadata.
 
 ### 7.6 Payment gateways (strategy)
 
@@ -582,28 +620,30 @@ because signatures cover the exact bytes; for IPNs without a body (VNPay) the qu
 | Webhook arrives before the payment exists     | `order.placed` not consumed yet                                                     | 404; the gateway retries                                                                                 |
 | Duplicate / concurrent webhooks               | Same result delivered twice                                                         | Final charge → 200 unchanged; concurrent → 409, retry acknowledged                                       |
 | Forged or altered webhook                     | Signature mismatch                                                                  | 401 + `WEBHOOK_SIGNATURE_MISMATCH` in the activity log                                                   |
-| Relay crash after publish/apply               | Duplicate delivery                                                                  | Idempotent consumers / markers                                                                           |
+| Relay crash after publish/apply               | Duplicate delivery                                                                  | Idempotent consumers: inbox (order), Redis + ledger (inventory), unique keys (payment)                   |
+| Consumer cannot process a message             | Retries exhausted (e.g. database down for minutes)                                  | Parked in `<topic>.dlq` with its error; replay it once fixed. The partition keeps flowing                |
 | inventory DB write fails after Lua            | Redis ahead of PG                                                                   | Reserve: Lua compensation; commit: ledger reconciliation on redelivery                                   |
 
 ## 9. Configuration and process roles
 
-| Variable                                                                                   | Service      | Default                  | Purpose                                                    |
-| ------------------------------------------------------------------------------------------ | ------------ | ------------------------ | ---------------------------------------------------------- |
-| `DATABASE_URL`                                                                             | all          | **required**             | PostgreSQL connection (fail fast + `SELECT 1` probe)       |
-| `REDIS_URL`                                                                                | order, inv.  | `redis://localhost:6379` | Redis                                                      |
-| `KAFKA_BROKERS`                                                                            | all          | `localhost:9092`         | Redpanda                                                   |
-| `INVENTORY_GRPC_HOST` / `_PORT`                                                            | order / inv. | `localhost` / `50051`    | gRPC                                                       |
-| `HTTP_ENABLED`                                                                             | all          | `true`                   | HTTP (and gRPC on inventory); `false` = worker-only pod    |
-| `OUTBOX_RELAY_ENABLED`, `OUTBOX_RELAY_INTERVAL_MS`                                         | all          | `true`, 1000             | Outbox relay                                               |
-| `KAFKA_CONSUMERS_ENABLED`                                                                  | all          | `true`                   | Kafka consumers                                            |
-| `RESERVATION_SWEEPER_ENABLED`, `RESERVATION_SWEEP_INTERVAL_MS`, `RESERVATION_TTL_SECONDS`  | inventory    | `true`, 30000, 900       | Expiry                                                     |
-| `STOCK_CACHE_WARMUP_ENABLED`                                                               | inventory    | `true`                   | Startup warm-up                                            |
-| `PAYMENT_DEFAULT_GATEWAY`, `PAYMENT_DEFAULT_CHANNEL`                                       | payment      | `MOCK`, `QR_CODE`        | Gateway and channel of new payments                        |
-| `MOCK_GATEWAY_SECRET`, `MOCK_GATEWAY_BASE_URL`                                             | payment      | required when used       | MOCK webhook HMAC secret, checkout URLs                    |
-| `MOCK_GATEWAY_ENABLED`                                                                     | payment      | `true`                   | `POST /payments/mock-gateway/pay`; **false in production** |
-| `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, `VNPAY_RETURN_URL`, `VNPAY_PAYMENT_URL`             | payment      | required when used       | VNPay adapter                                              |
-| `VIETQR_WEBHOOK_SECRET`, `VIETQR_BANK_BIN`, `VIETQR_ACCOUNT_PREFIX`, `VIETQR_ACCOUNT_NAME` | payment      | required when used       | VietQR virtual-account adapter                             |
-| `SWAGGER_ENABLED`                                                                          | all          | `true`                   | `/api/docs`, `/api/docs-json`                              |
+| Variable                                                                                   | Service      | Default                  | Purpose                                                                   |
+| ------------------------------------------------------------------------------------------ | ------------ | ------------------------ | ------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                                             | all          | **required**             | PostgreSQL connection (fail fast + `SELECT 1` probe)                      |
+| `REDIS_URL`                                                                                | order, inv.  | `redis://localhost:6379` | Redis                                                                     |
+| `KAFKA_BROKERS`                                                                            | all          | `localhost:9092`         | Redpanda                                                                  |
+| `INVENTORY_GRPC_HOST` / `_PORT`                                                            | order / inv. | `localhost` / `50051`    | gRPC                                                                      |
+| `HTTP_ENABLED`                                                                             | all          | `true`                   | HTTP (and gRPC on inventory); `false` = worker-only pod                   |
+| `OUTBOX_RELAY_ENABLED`, `OUTBOX_RELAY_INTERVAL_MS`                                         | all          | `true`, 1000             | Outbox relay                                                              |
+| `KAFKA_CONSUMERS_ENABLED`                                                                  | all          | `true`                   | Kafka consumers                                                           |
+| `KAFKA_CONSUMER_MAX_ATTEMPTS`, `KAFKA_CONSUMER_RETRY_BACKOFF_MS`                           | all          | 5, 200                   | Attempts before the dead-letter topic; first backoff (doubled each retry) |
+| `RESERVATION_SWEEPER_ENABLED`, `RESERVATION_SWEEP_INTERVAL_MS`, `RESERVATION_TTL_SECONDS`  | inventory    | `true`, 30000, 900       | Expiry                                                                    |
+| `STOCK_CACHE_WARMUP_ENABLED`                                                               | inventory    | `true`                   | Startup warm-up                                                           |
+| `PAYMENT_DEFAULT_GATEWAY`, `PAYMENT_DEFAULT_CHANNEL`                                       | payment      | `MOCK`, `QR_CODE`        | Gateway and channel of new payments                                       |
+| `MOCK_GATEWAY_SECRET`, `MOCK_GATEWAY_BASE_URL`                                             | payment      | required when used       | MOCK webhook HMAC secret, checkout URLs                                   |
+| `MOCK_GATEWAY_ENABLED`                                                                     | payment      | `true`                   | `POST /payments/mock-gateway/pay`; **false in production**                |
+| `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, `VNPAY_RETURN_URL`, `VNPAY_PAYMENT_URL`             | payment      | required when used       | VNPay adapter                                                             |
+| `VIETQR_WEBHOOK_SECRET`, `VIETQR_BANK_BIN`, `VIETQR_ACCOUNT_PREFIX`, `VIETQR_ACCOUNT_NAME` | payment      | required when used       | VietQR virtual-account adapter                                            |
+| `SWAGGER_ENABLED`                                                                          | all          | `true`                   | `/api/docs`, `/api/docs-json`                                             |
 
 The same image can run as API pods (`OUTBOX_RELAY_ENABLED=false`, `KAFKA_CONSUMERS_ENABLED=false`) or worker
 pods (`HTTP_ENABLED=false`). Images are multi-stage (`build` → `migrate` → `runtime`), non-root, with health checks.

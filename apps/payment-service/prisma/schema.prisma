@@ -2,7 +2,9 @@
 // Connection URL is configured in ../prisma.config.ts (Prisma 7).
 // Orders and customers are referenced by logical UUIDs only: no cross-service foreign keys (CLAUDE.md §3.4).
 // payment_transactions and payment_audit_logs are append-only; database triggers (see the init migration)
-// reject UPDATE / DELETE / TRUNCATE of finalised ledger rows and of any audit row.
+// reject UPDATE / DELETE / TRUNCATE of finalised ledger rows and of any audit row. The state machines of
+// payments and ledger rows, and the payment ↔ ledger consistency (checked at COMMIT), are enforced by the
+// payment_state_machine_guards migration.
 
 generator client {
   provider            = "prisma-client"

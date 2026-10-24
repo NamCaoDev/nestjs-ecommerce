@@ -28,7 +28,9 @@ const LATE_COMMIT_KEY_PREFIX = 'order:';
  * - when the stock is gone, `stock.reservation_failed` is published so the order gets cancelled;
  * - the `COMMITTED` ledger entry is reconciled on every shipped outcome, including redeliveries,
  *   so a crash between Redis and PostgreSQL never leaves the ledger behind.
- * Safe to repeat: Redis and the ledger both deduplicate by order. On a cold cache the missing counters
+ * Safe to repeat: Redis and the ledger both deduplicate by order. When Redis no longer knows the order
+ * (reservation record expired after its retention, or Redis lost its data), the durable ledger is checked
+ * first, so a late redelivery never ships the stock twice. On a cold cache the missing counters
  * are restored from PostgreSQL and the commit is retried once, so an order is never cancelled because
  * Redis lost its data.
  */
@@ -62,8 +64,22 @@ export class CommitStockHandler implements ICommandHandler<
   public async execute(
     command: CommitStockCommand,
   ): Promise<Result<void, DomainError>> {
+    const storedReservation: StockReservation | undefined =
+      await this.reservationStore.findByOrderId(command.orderId);
+    if (
+      storedReservation === undefined &&
+      (await this.stockLedger.hasMovement({
+        orderId: command.orderId,
+        actionType: 'COMMITTED',
+      }))
+    ) {
+      this.logger.log(
+        `Order ${command.orderId} was already shipped (ledger); redelivery ignored`,
+      );
+      return Result.ok();
+    }
     const reservationResult: Result<StockReservation, DomainError> =
-      await this.buildReservation(command);
+      CommitStockHandler.buildReservation({ command, storedReservation });
     if (reservationResult.isFailure) {
       return Result.fail(reservationResult.getError());
     }
@@ -87,11 +103,13 @@ export class CommitStockHandler implements ICommandHandler<
    * Uses the stored reservation when it still exists; otherwise the event lines under a
    * per-order key, which also deduplicates a late commit.
    */
-  private async buildReservation(
-    command: CommitStockCommand,
-  ): Promise<Result<StockReservation, DomainError>> {
-    const storedReservation: StockReservation | undefined =
-      await this.reservationStore.findByOrderId(command.orderId);
+  private static buildReservation({
+    command,
+    storedReservation,
+  }: {
+    readonly command: CommitStockCommand;
+    readonly storedReservation: StockReservation | undefined;
+  }): Result<StockReservation, DomainError> {
     return StockReservation.create({
       reservationKey:
         storedReservation?.reservationKey ??

@@ -32,6 +32,8 @@ order lines, so inventory tries to take the stock again. If the stock is gone, i
 | Situation                                   | Behaviour                                                                                 |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Redelivered `payment.succeeded`             | `{2}` from Redis; the ledger already has `COMMITTED` → no-op                              |
+| Redelivered after Redis forgot the order    | Reservation record expired (7 days) or Redis lost → the ledger is checked first → no-op   |
+| Infrastructure error                        | Retried with backoff, then parked in `payments.events.dlq`; offset committed manually     |
 | Crash between Redis commit and ledger write | Redelivery returns `{2}` and reconciles the ledger (`hasMovement` + partial unique index) |
 | Ordering of events per order                | Same partition (key = `orderId`) and the outbox claims one event per aggregate at a time  |
 | Malformed payload                           | Domain validation fails → logged and skipped (no poison-pill loop)                        |

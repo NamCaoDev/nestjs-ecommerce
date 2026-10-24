@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { Result } from '@org/shared-domain';
 import { DuplicateRequestError } from '../../../application/errors/duplicate-request.error';
 import { Order } from '../../../domain/aggregates/order.aggregate';
-import { OrderConcurrencyConflictError } from '../../../domain/errors/order-concurrency-conflict.error';
 import { OrderRepositoryPort } from '../../../domain/ports/order-repository.port';
 import { SaveOrderWithOutboxInput } from '../../../domain/ports/save-order-with-outbox.input';
 import { OrderId } from '../../../domain/value-objects/order-id.vo';
@@ -12,6 +11,7 @@ import { isIdempotencyKeyViolation } from './is-idempotency-key-violation.util';
 import { OrderPersistenceMapper } from './order-persistence.mapper';
 import { OrderWithItemsRecord } from './order-with-items.record';
 import { OutboxEventMapper } from './outbox-event.mapper';
+import { saveOrderUpdate } from './save-order-update.util';
 
 /**
  * Prisma implementation of {@link OrderRepositoryPort} with a transactional outbox (CLAUDE.md §4.2).
@@ -83,24 +83,8 @@ export class OrderPrismaRepository implements OrderRepositoryPort {
    */
   public async updateWithOutbox(order: Order): Promise<void> {
     await this.prisma.client.$transaction(
-      async (transaction: Prisma.TransactionClient): Promise<void> => {
-        const { count }: { count: number } = await transaction.order.updateMany(
-          {
-            where: { id: order.id.value, version: order.version },
-            data: {
-              status: order.status.value,
-              version: { increment: 1 },
-              updatedAt: new Date(order.updatedAt),
-            },
-          },
-        );
-        if (count === 0) {
-          throw new OrderConcurrencyConflictError(order.id.value);
-        }
-        await transaction.outboxEvent.createMany({
-          data: order.domainEvents.map(OutboxEventMapper.toCreateInput),
-        });
-      },
+      (transaction: Prisma.TransactionClient): Promise<void> =>
+        saveOrderUpdate({ transaction, order }),
     );
     order.clearEvents();
   }

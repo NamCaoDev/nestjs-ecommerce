@@ -29,7 +29,11 @@ export class KafkaInventoryEventPublisher implements InventoryEventPublisherPort
         {
           key: event.aggregateId,
           value: JSON.stringify(event),
-          headers: { 'event-type': event.eventType, 'event-id': event.eventId },
+          headers: {
+            'event-type': event.eventType,
+            'event-id': event.eventId,
+            'x-correlation-id': event.aggregateId,
+          },
         },
       ],
     });

@@ -57,6 +57,9 @@ describe('CommitStockHandler', () => {
     jest
       .spyOn(handler['logger'], 'warn')
       .mockImplementation((): void => undefined);
+    jest
+      .spyOn(handler['logger'], 'log')
+      .mockImplementation((): void => undefined);
   });
   describe('execute', () => {
     it('should commit the stored reservation for the placed order and record a COMMITTED movement', async () => {
@@ -80,6 +83,19 @@ describe('CommitStockHandler', () => {
         reservation: actualCommitted,
         isReacquired: false,
       });
+      expect(mockPublisher.publish).not.toHaveBeenCalled();
+    });
+    it('should not ship again when Redis forgot the order but the ledger already has its COMMITTED entry', async () => {
+      // Arrange
+      mockStore.findByOrderId.mockResolvedValue(undefined);
+      mockLedger.hasMovement.mockResolvedValue(true);
+      // Act
+      const actualResult: Result<void, DomainError> =
+        await handler.execute(createInputCommand());
+      // Assert
+      expect(actualResult.isSuccess).toBe(true);
+      expect(mockStore.commit).not.toHaveBeenCalled();
+      expect(mockLedger.recordMovement).not.toHaveBeenCalled();
       expect(mockPublisher.publish).not.toHaveBeenCalled();
     });
     it('should use the event lines under a per-order key when the reservation is gone', async () => {

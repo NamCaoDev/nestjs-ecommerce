@@ -8,6 +8,7 @@ import { PaymentGatewayProvider } from '../types/payment-gateway-provider.type';
 import { TransactionStatus } from '../types/transaction-status.type';
 import { TransactionType } from '../types/transaction-type.type';
 import { isBlank } from '../utils/is-blank.util';
+import { canTransitionTransactionStatus } from '../utils/can-transition-transaction-status.util';
 import { isUuid } from '../utils/is-uuid.util';
 import { Money } from '../value-objects/money.vo';
 import { CreateTransactionInput } from './create-transaction.input';
@@ -18,7 +19,8 @@ import { PaymentTransactionProps } from './payment-transaction.props';
  * Entry of the append-only payment ledger, owned by the {@link Payment} aggregate.
  *
  * Invariants: the amount is positive; an entry is created PENDING (charge) or SUCCESS (refund
- * confirmed by the gateway) and a PENDING entry is finalised exactly once. A final entry never changes.
+ * confirmed by the gateway); the status follows {@link TRANSACTION_STATUS_TRANSITIONS}, so a PENDING
+ * entry is finalised exactly once and a final entry never changes.
  */
 export class PaymentTransaction extends Entity<string> {
   public readonly type: TransactionType;
@@ -138,7 +140,9 @@ export class PaymentTransaction extends Entity<string> {
    * @throws {InvalidGatewayResultError} When the gateway transaction id is blank.
    */
   public finalize(input: FinalizeTransactionInput): void {
-    if (this.isFinal()) {
+    if (
+      !canTransitionTransactionStatus({ from: this.#status, to: input.status })
+    ) {
       throw new TransactionAlreadyFinalizedError({
         transactionId: this.id,
         status: this.#status,
