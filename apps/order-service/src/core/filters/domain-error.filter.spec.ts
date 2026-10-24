@@ -3,6 +3,7 @@ import { DomainError } from '@org/shared-domain';
 import { DuplicateRequestError } from '../../application/errors/duplicate-request.error';
 import { StockReservationFailedError } from '../../application/errors/stock-reservation-failed.error';
 import { EmptyOrderError } from '../../domain/errors/empty-order.error';
+import { OrderNotFoundError } from '../../domain/errors/order-not-found.error';
 import { DomainErrorFilter } from './domain-error.filter';
 
 describe('DomainErrorFilter', () => {
@@ -27,6 +28,12 @@ describe('DomainErrorFilter', () => {
       {
         inputError: new StockReservationFailedError(),
         expectedStatus: HttpStatus.BAD_REQUEST,
+      },
+      {
+        inputError: new OrderNotFoundError(
+          '0199a7c0-0000-7000-8000-000000000001',
+        ),
+        expectedStatus: HttpStatus.NOT_FOUND,
       },
       {
         inputError: new EmptyOrderError(),
