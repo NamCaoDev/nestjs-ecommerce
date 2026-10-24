@@ -1,0 +1,143 @@
+{
+  "name": "@org/order-service",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "name": "order-service",
+    "targets": {
+      "prune-lockfile": {
+        "dependsOn": [
+          "build"
+        ],
+        "cache": true,
+        "executor": "@nx/js:prune-lockfile",
+        "outputs": [
+          "{workspaceRoot}/apps/order-service/dist/package.json",
+          "{workspaceRoot}/apps/order-service/dist/package-lock.json"
+        ],
+        "options": {
+          "buildTarget": "build"
+        }
+      },
+      "copy-workspace-modules": {
+        "dependsOn": [
+          "build"
+        ],
+        "cache": true,
+        "outputs": [
+          "{workspaceRoot}/apps/order-service/dist/workspace_modules"
+        ],
+        "executor": "@nx/js:copy-workspace-modules",
+        "options": {
+          "buildTarget": "build"
+        }
+      },
+      "prune": {
+        "dependsOn": [
+          "prune-lockfile",
+          "copy-workspace-modules"
+        ],
+        "executor": "nx:noop"
+      },
+      "serve": {
+        "continuous": true,
+        "executor": "@nx/js:node",
+        "defaultConfiguration": "development",
+        "dependsOn": [
+          "build"
+        ],
+        "readyWhen": {
+          "signal": true
+        },
+        "options": {
+          "buildTarget": "order-service:build",
+          "runBuildTargetDependencies": false,
+          "inspect": "inspect",
+          "port": 9229
+        },
+        "configurations": {
+          "development": {
+            "buildTarget": "order-service:build:development"
+          },
+          "production": {
+            "buildTarget": "order-service:build:production"
+          }
+        }
+      },
+      "test": {
+        "options": {
+          "passWithNoTests": true
+        },
+        "dependsOn": [
+          "^build",
+          "prisma-generate"
+        ]
+      },
+      "prisma-generate": {
+        "executor": "nx:run-commands",
+        "cache": true,
+        "inputs": [
+          "{projectRoot}/prisma/schema.prisma",
+          "{projectRoot}/prisma.config.ts"
+        ],
+        "outputs": [
+          "{projectRoot}/src/infrastructure/persistence/prisma/generated"
+        ],
+        "options": {
+          "cwd": "{projectRoot}",
+          "command": "prisma generate"
+        }
+      },
+      "prisma-migrate": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{projectRoot}",
+          "command": "prisma migrate dev"
+        }
+      },
+      "prisma-deploy": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{projectRoot}",
+          "command": "prisma migrate deploy"
+        }
+      },
+      "build": {
+        "dependsOn": [
+          "^build",
+          "prisma-generate"
+        ]
+      },
+      "typecheck": {
+        "dependsOn": [
+          "^build",
+          "prisma-generate"
+        ]
+      },
+      "lint": {
+        "dependsOn": [
+          "prisma-generate"
+        ]
+      }
+    },
+    "tags": [
+      "scope:order",
+      "type:app"
+    ]
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0",
+    "tslib": "^2.3.0",
+    "@org/contracts": "*",
+    "@org/shared-domain": "*",
+    "@org/shared-infrastructure": "*",
+    "@org/shared-messaging": "*"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.0.0"
+  }
+}

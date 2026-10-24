@@ -5,6 +5,27 @@
   "references": [
     {
       "path": "./libs/shared/domain"
+    },
+    {
+      "path": "./apps/order-service-e2e"
+    },
+    {
+      "path": "./apps/order-service"
+    },
+    {
+      "path": "./apps/inventory-service-e2e"
+    },
+    {
+      "path": "./apps/inventory-service"
+    },
+    {
+      "path": "./libs/contracts"
+    },
+    {
+      "path": "./libs/shared/infrastructure"
+    },
+    {
+      "path": "./libs/shared/messaging"
     }
   ],
   "compilerOptions": {}
